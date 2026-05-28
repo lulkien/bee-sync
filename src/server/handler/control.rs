@@ -3,7 +3,7 @@
 //! This module contains the logic for handling control connections from clients,
 //! including handshake parsing, receiver setup, and transfer orchestration.
 
-use std::sync::{Arc, Mutex};
+use std::{fs, sync::{Arc, Mutex}};
 
 use anyhow::Result;
 use log::{debug, error, info};
@@ -87,6 +87,13 @@ pub async fn handle_control_connection(
     if check_existing_file(output_dir, &handshake.safe_name, &handshake.full_hash)? {
         info!("File {} already exists, skipping", handshake.safe_name);
         send_handshake_response(&mut stream, handshake::RESP_EXISTS, &[]).await?;
+        return Ok(());
+    }
+
+    // Ensure output directory exists and is writable before accepting the transfer
+    if let Err(e) = fs::create_dir_all(output_dir) {
+        error!("Output directory unavailable: {}", e);
+        send_handshake_response(&mut stream, handshake::RESP_ERR, &[]).await?;
         return Ok(());
     }
 
@@ -196,8 +203,7 @@ async fn allocate_sockets(
     if !try_reserve_ports(num_socks) {
         return Err(format!(
             "Not enough data ports available (need {}, have {})",
-            num_socks,
-            TOTAL_DATA_PORTS
+            num_socks, TOTAL_DATA_PORTS
         ));
     }
 
@@ -366,7 +372,7 @@ pub fn check_existing_file(
     expected_hash: &[u8; 32],
 ) -> Result<bool> {
     let final_path = format!("{}/{}", output_dir, safe_name);
-    if !std::fs::exists(&final_path)? {
+    if !fs::exists(&final_path)? {
         return Ok(false);
     }
 
@@ -409,7 +415,7 @@ pub fn create_receiver(
 pub fn scan_existing_parts(receiver: &mut FileReceiver, num_chunks: usize) {
     for i in 0..num_chunks {
         let part_path = receiver.part_path(i);
-        if std::fs::exists(&part_path).unwrap_or(false) {
+        if fs::exists(&part_path).unwrap_or(false) {
             receiver.received_chunks[i] = true;
         }
     }
