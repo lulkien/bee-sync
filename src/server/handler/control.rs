@@ -126,12 +126,18 @@ pub async fn handle_control_connection(
     // Wait for all chunks
     wait_for_completion(&receiver).await;
 
-    // Assemble final file
-    let success = match assemble_file(&receiver) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to assemble file: {}", e);
-            false
+    // Determine outcome: skip assembly if the transfer already failed
+    let failed = receiver.lock().unwrap().failed;
+    let success = if failed {
+        error!("Transfer aborted due to I/O failure");
+        false
+    } else {
+        match assemble_file(&receiver) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to assemble file: {}", e);
+                false
+            }
         }
     };
 
@@ -142,8 +148,16 @@ pub async fn handle_control_connection(
         handshake::RESP_ERR
     };
 
-    if let Err(e) = frame::send_timeout(&mut stream, &[final_status]).await {
-        error!("Failed to send final status: {}", e);
+    match frame::send_timeout(&mut stream, &[final_status]).await {
+        Ok(()) => {}
+        Err(e) => {
+            // Broken pipe is expected when the client already disconnected
+            if e.to_string().contains("Broken pipe") {
+                debug!("Client disconnected before final status");
+            } else {
+                error!("Failed to send final status: {}", e);
+            }
+        }
     }
 
     // Cleanup
@@ -152,7 +166,7 @@ pub async fn handle_control_connection(
     if success {
         info!("File {} received successfully", handshake.filename);
     } else {
-        error!("File {} assembly failed (hash mismatch)", handshake.filename);
+        error!("File {} transfer failed", handshake.filename);
     }
 
     Ok(())
