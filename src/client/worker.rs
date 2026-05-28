@@ -15,7 +15,7 @@ use anyhow::Result;
 use tokio::net::TcpStream;
 
 use crate::{
-    file_ops::calc_md5,
+    file_ops::calc_hash,
     protocol::{frame, chunk},
 };
 
@@ -48,22 +48,22 @@ pub async fn send_chunk(
     let actual_size = file.read(&mut chunk_data)?;
     chunk_data.truncate(actual_size);
 
-    let chunk_md5 = calc_md5(&chunk_data);
+    let chunk_hash = calc_hash(&chunk_data);
 
     let mut header = vec![0u8; chunk::HEADER_SIZE];
     header[0..4].copy_from_slice(&(chunk_index as u32).to_be_bytes());
     header[4..12].copy_from_slice(&chunk_offset.to_be_bytes());
     header[12..16].copy_from_slice(&(actual_size as u32).to_be_bytes());
 
-    // Total bytes on the wire for this chunk: header + data + md5
-    let total_bytes = chunk::HEADER_SIZE + actual_size + chunk::MD5_SIZE;
+    // Total bytes on the wire for this chunk: header + data + hash
+    let total_bytes = chunk::HEADER_SIZE + actual_size + chunk::HASH_SIZE;
 
     for attempt in 0..retries {
         // Each retry gets more time (1x, 2x, 3x the base timeout)
         let timeout = frame::timeout_for_bytes(total_bytes)
             .saturating_mul((attempt + 1) as u32);
 
-        tokio::time::timeout(timeout, frame::send_parts(stream, &[&header, &chunk_data, &chunk_md5]))
+        tokio::time::timeout(timeout, frame::send_parts(stream, &[&header, &chunk_data, &chunk_hash]))
             .await
             .map_err(|_| anyhow::anyhow!("send chunk {} timed out after {:?}", chunk_index, timeout))??;
 
@@ -85,7 +85,7 @@ pub async fn send_chunk(
                 tokio::time::sleep(Duration::from_millis(200 * (attempt + 1) as u64)).await;
                 continue;
             }
-            return Err(anyhow::anyhow!("MD5 mismatch"));
+            return Err(anyhow::anyhow!("hash mismatch"));
         }
     }
 

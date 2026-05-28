@@ -1,14 +1,14 @@
 //! Data connection handler - receives individual chunks
 //!
 //! This module handles the data connections from clients, receiving chunked
-//! file data, verifying MD5 checksums, and writing to .part files.
+//! file data, verifying BLAKE3 hashes, and writing to .part files.
 //!
 //! # Architecture
 //!
 //! - [`handle_data_connection()`]: Main entry point for data connections
 //! - [`handle_query()`]: Handle chunk index query from client
 //! - [`process_chunk()`]: Process a single chunk (parse, verify, write)
-//! - [`verify_and_write_chunk()`]: Verify MD5 and write chunk to file
+//! - [`verify_and_write_chunk()`]: Verify BLAKE3 hash and write chunk to file
 //! - [`send_ack()`]: Send acknowledgment back to client
 
 use std::sync::{Arc, Mutex};
@@ -24,16 +24,16 @@ use crate::{
 
 use super::super::{file_receiver::FileReceiver, get_receiver};
 
-/// Handle a data connection: receive chunks, verify MD5, write to .part files, send ACK
+/// Handle a data connection: receive chunks, verify BLAKE3 hash, write to .part files, send ACK
 ///
 /// # Protocol
 ///
 /// 1. Receives framed messages from client
 /// 2. Handles QUERY_MAGIC (0xFF) to return received chunk indices
 /// 3. Parses chunk headers (index, offset, size)
-/// 4. Verifies MD5 of received chunk data
+/// 4. Verifies BLAKE3 hash of received chunk data
 /// 5. Writes valid chunks to .part files
-/// 6. Sends ACK_OK (0x00) or ACK_MD5_MISMATCH (0x01)
+/// 6. Sends ACK_OK (0x00) or ACK_HASH_MISMATCH (0x01)
 ///
 /// # Arguments
 ///
@@ -52,7 +52,7 @@ use super::super::{file_receiver::FileReceiver, get_receiver};
 /// - Receives framed messages from the client
 /// - Handles special query messages (returns list of received chunks)
 /// - Parses chunk headers and validates data
-/// - Verifies MD5 checksums
+/// - Verifies BLAKE3 hashes
 /// - Writes valid chunks to .part files
 /// - Sends acknowledgments back to the client
 pub async fn handle_data_connection(mut stream: TcpStream, local_port: u16) -> Result<()> {
@@ -137,7 +137,7 @@ async fn handle_query(receiver: &Arc<Mutex<FileReceiver>>, stream: &mut TcpStrea
     Ok(())
 }
 
-/// Process a single chunk: parse header, verify MD5, write to file
+/// Process a single chunk: parse header, verify BLAKE3 hash, write to file
 ///
 /// # Arguments
 ///
@@ -157,76 +157,103 @@ async fn handle_query(receiver: &Arc<Mutex<FileReceiver>>, stream: &mut TcpStrea
 /// - Bytes 4-11: Chunk offset (u64, big-endian)
 /// - Bytes 12-15: Chunk size (u32, big-endian)
 /// - Bytes 16..16+size: Chunk data
-/// - Bytes 16+size..16+size+16: Chunk MD5 (16 bytes)
+/// - Bytes 16+size..16+size+32: Chunk BLAKE3 hash (32 bytes)
 async fn process_chunk(
     receiver: &Arc<Mutex<FileReceiver>>,
     stream: &mut TcpStream,
     data: &[u8],
 ) -> Result<()> {
-    // Validate chunk message length
-    if data.len() < chunk::HEADER_SIZE + chunk::MD5_SIZE {
-        error!("Chunk message too short: {} bytes", data.len());
-        return Ok(());
-    }
-
-    // Parse chunk header
+    // Parse chunk header (need chunk_size before we can validate total length)
     let chunk_index = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
     let _chunk_offset = u64::from_be_bytes([
         data[4], data[5], data[6], data[7], data[8], data[9], data[10], data[11],
     ]);
     let chunk_size = u32::from_be_bytes([data[12], data[13], data[14], data[15]]) as usize;
 
+    // Validate total chunk message length (header + data + hash)
+    let expected_len = chunk::HEADER_SIZE + chunk_size + chunk::HASH_SIZE;
+    if data.len() < expected_len {
+        error!(
+            "Chunk message too short: {} bytes (expected at least {})",
+            data.len(),
+            expected_len
+        );
+        return Ok(());
+    }
+
     // Validate chunk index against receiver's expected range
-    {
-        let num_chunks = receiver.lock().unwrap().num_chunks;
-        if chunk_index >= num_chunks {
+    let (expected_chunk_size, is_last) = {
+        let recv = receiver.lock().unwrap();
+        if chunk_index >= recv.num_chunks {
             error!(
                 "Chunk index {} out of range (num_chunks={})",
-                chunk_index, num_chunks
+                chunk_index, recv.num_chunks
             );
             return Ok(());
         }
+        let last_idx = recv.num_chunks.saturating_sub(1);
+        let is_last = chunk_index == last_idx;
+        let expected = if is_last {
+            // Last chunk may be smaller than recv.chunk_size
+            let remainder =
+                recv.file_size as usize - (last_idx * recv.chunk_size);
+            if remainder == 0 { recv.chunk_size } else { remainder }
+        } else {
+            recv.chunk_size
+        };
+        (expected, is_last)
+    };
+
+    if chunk_size != expected_chunk_size {
+        error!(
+            "Chunk {} size mismatch: got {}, expected {}{}",
+            chunk_index,
+            chunk_size,
+            expected_chunk_size,
+            if is_last { " (last chunk)" } else { "" }
+        );
+        return Ok(());
     }
 
-    // Extract chunk data and MD5
+    // Extract chunk data and hash
     let chunk_data = data[chunk::HEADER_SIZE..chunk::HEADER_SIZE + chunk_size].to_vec();
-    let chunk_md5_rcvd: [u8; 16] = data
-        [chunk::HEADER_SIZE + chunk_size..chunk::HEADER_SIZE + chunk_size + chunk::MD5_SIZE]
+    let chunk_hash_rcvd: [u8; 32] = data
+        [chunk::HEADER_SIZE + chunk_size..chunk::HEADER_SIZE + chunk_size + chunk::HASH_SIZE]
         .try_into()
         .map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid chunk MD5 length")
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid chunk hash length")
         })?;
 
-    // Verify MD5 and write chunk
-    let ack = verify_and_write_chunk(receiver, chunk_index, &chunk_data, &chunk_md5_rcvd)?;
+    // Verify hash and write chunk
+    let ack = verify_and_write_chunk(receiver, chunk_index, &chunk_data, &chunk_hash_rcvd)?;
 
     send_ack(stream, ack).await?;
 
     Ok(())
 }
 
-/// Verify MD5 and write chunk to .part file
+/// Verify BLAKE3 hash and write chunk to .part file
 ///
 /// # Arguments
 ///
 /// - `receiver`: FileReceiver for this transfer
 /// - `chunk_index`: Index of the chunk being processed
 /// - `chunk_data`: Raw chunk data
-/// - `chunk_md5_rcvd`: Received MD5 hash
+/// - `chunk_hash_rcvd`: Received BLAKE3 hash
 ///
 /// # Returns
 ///
-/// - `ACK_OK` if MD5 matches
-/// - `ACK_MD5_MISMATCH` if MD5 doesn't match
+/// - `chunk::ACK_OK` if hash matches
+/// - `chunk::ACK_HASH_MISMATCH` if hash doesn't match
 fn verify_and_write_chunk(
     receiver: &Arc<Mutex<FileReceiver>>,
     chunk_index: usize,
     chunk_data: &[u8],
-    chunk_md5_rcvd: &[u8; 16],
+    chunk_hash_rcvd: &[u8; 32],
 ) -> Result<u8> {
-    let chunk_md5_calc = file_ops::calc_md5(chunk_data);
+    let chunk_hash_calc = file_ops::calc_hash(chunk_data);
 
-    if chunk_md5_calc == *chunk_md5_rcvd {
+    if chunk_hash_calc == *chunk_hash_rcvd {
         let part_path = receiver.lock().unwrap().part_path(chunk_index);
         std::fs::write(&part_path, chunk_data)?;
 
@@ -243,8 +270,8 @@ fn verify_and_write_chunk(
         );
         Ok(chunk::ACK_OK)
     } else {
-        error!("Chunk {} MD5 mismatch", chunk_index);
-        Ok(chunk::ACK_MD5_MISMATCH)
+        error!("Chunk {} hash mismatch", chunk_index);
+        Ok(chunk::ACK_HASH_MISMATCH)
     }
 }
 
@@ -253,7 +280,7 @@ fn verify_and_write_chunk(
 /// # Arguments
 ///
 /// - `stream`: TCP stream for this data connection
-/// - `ack`: Acknowledgment code (ACK_OK or ACK_MD5_MISMATCH)
+/// - `ack`: Acknowledgment code (chunk::ACK_OK or chunk::ACK_HASH_MISMATCH)
 ///
 /// # Returns
 ///

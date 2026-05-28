@@ -17,7 +17,7 @@ use anyhow::Result;
 use indicatif::ProgressStyle;
 
 use crate::{
-    file_ops::file_md5,
+    file_ops::file_hash,
     protocol::{frame, handshake},
 };
 
@@ -122,7 +122,7 @@ pub async fn run_client(config: ClientConfig) -> i32 {
 /// - 8 bytes: file size (big-endian)
 /// - 4 bytes: chunk size (big-endian)
 /// - 4 bytes: number of chunks (big-endian)
-/// - 16 bytes: full file MD5 hash
+/// - 32 bytes: full file BLAKE3 hash
 ///
 /// # Arguments
 /// * `filepath` - Path to the file to transfer
@@ -146,7 +146,7 @@ pub async fn build_handshake(filepath: &str, chunk_size: usize) -> Result<Vec<u8
     } else {
         1
     };
-    let full_md5 = file_md5(filepath)?;
+    let full_hash = file_hash(filepath)?;
 
     let mut handshake =
         Vec::with_capacity(handshake::PREFIX_SIZE + filename_bytes.len() + handshake::SUFFIX_SIZE);
@@ -156,7 +156,7 @@ pub async fn build_handshake(filepath: &str, chunk_size: usize) -> Result<Vec<u8
     handshake.extend_from_slice(&file_size.to_be_bytes());
     handshake.extend_from_slice(&(chunk_size as u32).to_be_bytes());
     handshake.extend_from_slice(&(num_chunks as u32).to_be_bytes());
-    handshake.extend_from_slice(&full_md5);
+    handshake.extend_from_slice(&full_hash);
 
     Ok(handshake)
 }

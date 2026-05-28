@@ -6,17 +6,17 @@
 //!
 //! ### Handshake (client → server, on control connection)
 //!   MAGIC(4) + filename_len(2,BE) + filename(UTF-8)
-//!   + file_size(8,BE) + chunk_size(4,BE) + num_chunks(4,BE) + full_md5(16 raw)
+//!   + file_size(8,BE) + chunk_size(4,BE) + num_chunks(4,BE) + full_hash(32 BLAKE3)
 //!
 //! ### Handshake response (server → client)
 //!   status(1) + num_ports(1) + ports(num_ports × 2,BE)
 //!
 //! ### Chunk data (client → server, on data connections)
 //!   chunk_index(4,BE) + chunk_offset(8,BE) + chunk_size(4,BE)
-//!   + chunk_data + chunk_md5(16 raw)
+//!   + chunk_data + chunk_hash(32 BLAKE3)
 //!
 //! ### Chunk ACK (server → client)
-//!   single byte: ACK_OK(0x00) or ACK_MD5_MISMATCH(0x01)
+//!   single byte: ACK_OK(0x00) or ACK_HASH_MISMATCH(0x01)
 //!
 //! ### Resume query (client → server, on data connection)
 //!   single byte: QUERY_MAGIC(0x01)
@@ -138,8 +138,8 @@ pub mod handshake {
     pub const PREFIX_SIZE: usize = 6;
 
     /// Fixed-size suffix after the variable-length filename:
-    ///   file_size(8,BE) + chunk_size(4,BE) + num_chunks(4,BE) + md5(16) = 32 bytes
-    pub const SUFFIX_SIZE: usize = 32;
+    ///   file_size(8,BE) + chunk_size(4,BE) + num_chunks(4,BE) + hash(32) = 48 bytes
+    pub const SUFFIX_SIZE: usize = 48;
 
     /// Handshake response: transfer accepted, data ports follow
     pub const RESP_OK: u8 = 0;
@@ -147,27 +147,27 @@ pub mod handshake {
     /// Handshake response: server error
     pub const RESP_ERR: u8 = 1;
 
-    /// Handshake response: file already exists with matching MD5
+    /// Handshake response: file already exists with matching hash
     pub const RESP_EXISTS: u8 = 2;
 }
 
 // ── Chunk transfer messages ──
 
 /// Chunk data transfer: sent by client workers over data connections, with
-/// per-chunk MD5 verification and resume support.
+/// per-chunk BLAKE3 verification and resume support.
 pub mod chunk {
     /// Chunk message header size:
     ///   chunk_index(4,BE) + chunk_offset(8,BE) + chunk_size(4,BE) = 16 bytes
     pub const HEADER_SIZE: usize = 16;
 
-    /// Per-chunk MD5 digest size (raw 16 bytes)
-    pub const MD5_SIZE: usize = 16;
+    /// Per-chunk BLAKE3 hash size (32 bytes)
+    pub const HASH_SIZE: usize = 32;
 
-    /// Chunk ACK: MD5 matched, chunk stored
+    /// Chunk ACK: hash matched, chunk stored
     pub const ACK_OK: u8 = 0;
 
-    /// Chunk ACK: MD5 mismatch, client should retry
-    pub const ACK_MD5_MISMATCH: u8 = 1;
+    /// Chunk ACK: hash mismatch, client should retry
+    pub const ACK_HASH_MISMATCH: u8 = 1;
 
     /// Resume query magic byte — client sends this on a data connection to
     /// ask the server which chunks it already has.

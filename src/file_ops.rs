@@ -1,20 +1,30 @@
 //! File operations module for bee-sync.
 //!
-//! Provides MD5 calculation, chunk splitting, and file assembly.
+//! Provides BLAKE3 hashing for chunk and file integrity verification.
 
 use std::{fs::File, io::Read};
 
 use anyhow::Result;
 
-/// Calculate MD5 hash of data
-pub fn calc_md5(data: &[u8]) -> [u8; 16] {
-    md5::compute(data).into()
+/// BLAKE3 output size (32 bytes)
+pub const HASH_SIZE: usize = 32;
+
+/// Calculate BLAKE3 hash of data
+pub fn calc_hash(data: &[u8]) -> [u8; HASH_SIZE] {
+    blake3::hash(data).into()
 }
 
-/// Calculate MD5 hash of file
-pub fn file_md5(filepath: &str) -> Result<[u8; 16]> {
+/// Calculate BLAKE3 hash of entire file
+pub fn file_hash(filepath: &str) -> Result<[u8; HASH_SIZE]> {
     let mut file = File::open(filepath)?;
-    let mut data = Vec::new();
-    file.read_to_end(&mut data)?;
-    Ok(calc_md5(&data))
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+    Ok(hasher.finalize().into())
 }

@@ -14,7 +14,7 @@ use tokio::{
 };
 
 use crate::{
-    file_ops::file_md5,
+    file_ops::file_hash,
     protocol::{frame, handshake},
 };
 
@@ -36,7 +36,7 @@ pub struct HandshakeData {
     pub file_size: u64,
     pub chunk_size: usize,
     pub num_chunks: usize,
-    pub full_md5: [u8; 16],
+    pub full_hash: [u8; 32],
 }
 
 /// Handle control connection: parse handshake, allocate data ports, coordinate transfer
@@ -84,7 +84,7 @@ pub async fn handle_control_connection(
     );
 
     // Check if file already exists and matches
-    if check_existing_file(output_dir, &handshake.safe_name, &handshake.full_md5)? {
+    if check_existing_file(output_dir, &handshake.safe_name, &handshake.full_hash)? {
         info!("File {} already exists, skipping", handshake.safe_name);
         send_handshake_response(&mut stream, handshake::RESP_EXISTS, &[]).await?;
         return Ok(());
@@ -108,7 +108,7 @@ pub async fn handle_control_connection(
         handshake.file_size,
         handshake.chunk_size,
         handshake.num_chunks,
-        handshake.full_md5,
+        handshake.full_hash,
         output_dir.to_string(),
     );
 
@@ -152,7 +152,7 @@ pub async fn handle_control_connection(
     if success {
         info!("File {} received successfully", handshake.filename);
     } else {
-        error!("File {} assembly failed (MD5 mismatch)", handshake.filename);
+        error!("File {} assembly failed (hash mismatch)", handshake.filename);
     }
 
     Ok(())
@@ -257,6 +257,17 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
 
     // Extract filename (safe base name, strips any directory components)
     let filename_len = u16::from_be_bytes([data[4], data[5]]) as usize;
+
+    // Cap filename length to common filesystem limit (255 bytes)
+    const MAX_FILENAME_LEN: usize = 255;
+    if filename_len > MAX_FILENAME_LEN {
+        anyhow::bail!(
+            "filename too long: {} bytes (max {})",
+            filename_len,
+            MAX_FILENAME_LEN
+        );
+    }
+
     if data.len() < handshake::PREFIX_SIZE + filename_len + handshake::SUFFIX_SIZE {
         anyhow::bail!("Handshake too short for filename");
     }
@@ -274,7 +285,7 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
     //   offset + 0..8   file_size    u64 big-endian, total bytes of the source file
     //   offset + 8..12  chunk_size   u32 big-endian, max bytes per chunk (last may be smaller)
     //   offset + 12..16 num_chunks   u32 big-endian, total number of chunks
-    //   offset + 16..32 full_md5     raw 16-byte MD5 digest of the complete source file
+    //   offset + 16..48 full_hash    raw 32-byte BLAKE3 hash of the complete source file
     let offset = offset + filename_len;
     let file_size = u64::from_be_bytes([
         data[offset],
@@ -298,9 +309,9 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
         data[offset + 14],
         data[offset + 15],
     ]) as usize;
-    let full_md5: [u8; 16] = data[offset + 16..offset + 32]
+    let full_hash: [u8; 32] = data[offset + 16..offset + 48]
         .try_into()
-        .map_err(|_| anyhow::anyhow!("Invalid MD5 length"))?;
+        .map_err(|_| anyhow::anyhow!("Invalid hash length"))?;
 
     // Security: validate metadata ranges to prevent OOM / panics downstream
     const MAX_CHUNKS: usize = 1_000_000;
@@ -320,16 +331,16 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
         file_size,
         chunk_size,
         num_chunks,
-        full_md5,
+        full_hash,
     })
 }
 
-/// Check if file already exists and matches expected MD5
+/// Check if file already exists and matches expected hash
 ///
 /// # Arguments
 /// - `output_dir`: Directory to check for existing file
 /// - `safe_name`: Safe filename to check
-/// - `expected_md5`: Expected MD5 hash of complete file
+/// - `expected_hash`: Expected BLAKE3 hash of complete file
 ///
 /// # Returns
 /// - `Ok(true)`: File exists and matches
@@ -338,15 +349,15 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
 pub fn check_existing_file(
     output_dir: &str,
     safe_name: &str,
-    expected_md5: &[u8; 16],
+    expected_hash: &[u8; 32],
 ) -> Result<bool> {
     let final_path = format!("{}/{}", output_dir, safe_name);
     if !std::fs::exists(&final_path)? {
         return Ok(false);
     }
 
-    let existing_md5 = file_md5(&final_path)?;
-    Ok(existing_md5 == *expected_md5)
+    let existing_hash = file_hash(&final_path)?;
+    Ok(existing_hash == *expected_hash)
 }
 
 /// Create and initialize FileReceiver for a transfer
@@ -356,7 +367,7 @@ pub fn check_existing_file(
 /// - `file_size`: Total file size
 /// - `chunk_size`: Size of each chunk
 /// - `num_chunks`: Number of chunks
-/// - `full_md5`: Expected MD5 of complete file
+/// - `full_hash`: Expected BLAKE3 hash of complete file
 /// - `output_dir`: Output directory
 ///
 /// # Returns
@@ -366,11 +377,11 @@ pub fn create_receiver(
     file_size: u64,
     chunk_size: usize,
     num_chunks: usize,
-    full_md5: [u8; 16],
+    full_hash: [u8; 32],
     output_dir: String,
 ) -> Arc<Mutex<FileReceiver>> {
     Arc::new(Mutex::new(FileReceiver::new(
-        safe_name, file_size, chunk_size, num_chunks, full_md5, output_dir,
+        safe_name, file_size, chunk_size, num_chunks, full_hash, output_dir,
     )))
 }
 

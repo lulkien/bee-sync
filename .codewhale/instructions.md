@@ -16,7 +16,7 @@ The server tracks which chunks have been received, enabling resume after interru
 | Logging | `fern` + `log` | Use `log::info!()`, `log::error!()`, `log::debug!()`. The logger is initialized in `src/logger.rs`. `--verbose` enables debug level. |
 | Progress bars | `indicatif` | Use `ProgressBar` for transfer progress. Wrap in `Arc<Mutex<ProgressBar>>` for shared access across workers. |
 | TLS | `rustls` 0.23 + `tokio-rustls` + `webpki-roots` | Server uses `TlsAcceptor`, client uses `TlsConnector`. Custom `NoCertVerifier` for `--tls-no-verify`. |
-| Hashing | `md5` | MD5 for chunk and full-file integrity verification. Wrappers in `src/file_ops.rs`. |
+| Hashing | `blake3` | BLAKE3 for chunk and full-file integrity verification. Wrappers in `src/file_ops.rs`. |
 | Signal handling | `ctrlc` | Graceful shutdown via `AtomicBool` flag. |
 
 ## Architecture
@@ -25,14 +25,14 @@ The server tracks which chunks have been received, enabling resume after interru
           Control Channel (port 19999, TLS optional)
 Client  ────────────────────────────────────────────────>  Server
         <────────────────────────────────────────────────
-        Handshake: filename, size, chunk_size, num_chunks, MD5
+        Handshake: filename, size, chunk_size, num_chunks, BLAKE3 hash
         Response:  status + allocated data port list
 
           Data Channels (ports 45000-46000, plain TCP)
 Client  ════════════════════════════════════════════════>  Server
         ════════════════════════════════════════════════>
         ════════════════════════════════════════════════>
-        Parallel chunk transfer with per-chunk MD5 ACKs
+        Parallel chunk transfer with per-chunk BLAKE3 ACKs
 ```
 
 - **Control connection**: single TCP/TLS, used for handshake only
@@ -47,7 +47,7 @@ src/
 ├── cli.rs           Clap command definitions (Cli, ServerArgs, ClientArgs)
 ├── logger.rs        Fern-based logging initialization
 ├── protocol.rs      Frame format, MAGIC, constants, send_frame / recv_frame
-├── file_ops.rs      MD5 calculation (calc_md5, file_md5)
+├── file_ops.rs      BLAKE3 calculation (calc_hash, file_hash)
 ├── utils.rs         Chunk size parser (parse_chunk_size)
 ├── client/
 │   ├── mod.rs       run_client, perform_handshake, worker orchestration
@@ -67,10 +67,10 @@ src/
 
 Every message on the wire is length-prefixed: 4 bytes big-endian length + payload.
 
-- **Handshake**: `MAGIC(4) + filename_len(2,BE) + filename + file_size(8,BE) + chunk_size(4,BE) + num_chunks(4,BE) + full_md5(16)`
+- **Handshake**: `MAGIC(4) + filename_len(2,BE) + filename + file_size(8,BE) + chunk_size(4,BE) + num_chunks(4,BE) + full_hash(32)`
 - **Handshake response**: `status(1) + num_ports(1) + ports(num_ports * 2,BE)`
-- **Chunk message**: `chunk_index(4,BE) + chunk_offset(8,BE) + chunk_size(4,BE) + chunk_data + chunk_md5(16)`
-- **ACK**: single byte (`ACK_OK = 0x00`, `ACK_MD5_MISMATCH = 0x01`)
+- **Chunk message**: `chunk_index(4,BE) + chunk_offset(8,BE) + chunk_size(4,BE) + chunk_data + chunk_hash(32)`
+- **ACK**: single byte (`ACK_OK = 0x00`, `ACK_HASH_MISMATCH = 0x01`)
 - **Query (resume)**: single byte `QUERY_MAGIC = 0x01`
 - **Query response**: `count(4,BE) + indices(count * 4,BE)`
 
@@ -138,7 +138,7 @@ cargo run --release -- server --verbose
 
 ## Don't Reinvent the Wheel
 
-- **Never** implement your own MD5, async runtime, TLS, CLI parser, or logger. Use the crates listed in the Technology Stack table.
+- **Never** implement your own BLAKE3, async runtime, TLS, CLI parser, or logger. Use the crates listed in the Technology Stack table.
 - When a standard library API exists (`std::fs`, `std::path`, `std::io`), prefer it over external crates.
 - For protocol serialization, use manual `to_be_bytes()` / `from_be_bytes()` — the protocol is simple enough that `serde` would be overkill.
 

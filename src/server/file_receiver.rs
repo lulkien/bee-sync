@@ -13,7 +13,7 @@ pub struct FileReceiver {
     pub file_size: u64,
     pub chunk_size: usize,
     pub num_chunks: usize,
-    pub full_md5: [u8; 16],
+    pub full_hash: [u8; 32],
     pub output_dir: String,
     pub received_chunks: Vec<bool>,
 }
@@ -25,7 +25,7 @@ impl FileReceiver {
         file_size: u64,
         chunk_size: usize,
         num_chunks: usize,
-        full_md5: [u8; 16],
+        full_hash: [u8; 32],
         output_dir: String,
     ) -> Self {
         let received_chunks = vec![false; num_chunks];
@@ -34,7 +34,7 @@ impl FileReceiver {
             file_size,
             chunk_size,
             num_chunks,
-            full_md5,
+            full_hash,
             output_dir,
             received_chunks,
         }
@@ -59,7 +59,7 @@ impl FileReceiver {
         let part_path =
             |i: usize| Path::new(&self.output_dir).join(format!("{}.part{}", self.filename, i));
 
-        let mut hasher = md5::Context::new();
+        let mut hasher = blake3::Hasher::new();
         let mut out = std::fs::File::create(&final_path)?;
 
         for i in 0..self.num_chunks {
@@ -76,12 +76,12 @@ impl FileReceiver {
                     break;
                 }
                 out.write_all(&buffer[..n])?;
-                hasher.consume(&buffer[..n]);
+                hasher.update(&buffer[..n]);
             }
             fs::remove_file(&part)?;
         }
 
-        let actual_md5: [u8; 16] = hasher.finalize().into();
-        Ok(actual_md5 == self.full_md5)
+        let actual_hash: [u8; 32] = hasher.finalize().into();
+        Ok(actual_hash == self.full_hash)
     }
 }
