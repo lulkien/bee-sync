@@ -1,0 +1,20 @@
+[package]
+name = "bee-sync"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive"] }
+ctrlc = "3.5.2"
+digest = "0.11.3"
+fern = "0.7.1"
+indicatif = "0.18.4"
+log = "0.4.30"
+md5 = "0.8.0"
+rustls = "0.23.40"
+rustls-pemfile = "2.2.0"
+simple_logger = "5.2.0"
+tokio = { version = "1.52.3", features = ["full"] }
+tokio-rustls = "0.26.4"
+webpki-roots = "1.0.7"
