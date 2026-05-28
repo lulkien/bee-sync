@@ -428,10 +428,14 @@ async fn run_workers(
         }
     }
 
-    // Finish progress bar
+    // Finish progress bar (abandon if any chunk failed, so it doesn't lie at 100%)
     {
         let pb = progress_bar.lock().unwrap();
-        pb.finish();
+        if all_failed.is_empty() {
+            pb.finish();
+        } else {
+            pb.abandon();
+        }
     }
 
     all_failed

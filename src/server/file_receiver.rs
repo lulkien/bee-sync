@@ -16,6 +16,8 @@ pub struct FileReceiver {
     pub full_hash: [u8; 32],
     pub output_dir: String,
     pub received_chunks: Vec<bool>,
+    /// Set to true when a disk write fails — signals the control handler to abort
+    pub failed: bool,
 }
 
 #[allow(unused)]
@@ -37,6 +39,7 @@ impl FileReceiver {
             full_hash,
             output_dir,
             received_chunks,
+            failed: false,
         }
     }
 

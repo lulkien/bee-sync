@@ -448,8 +448,11 @@ pub async fn spawn_data_servers(
 /// - `receiver`: FileReceiver to monitor
 pub async fn wait_for_completion(receiver: &Arc<Mutex<FileReceiver>>) {
     loop {
-        let is_complete = receiver.lock().unwrap().is_complete();
-        if is_complete {
+        let should_break = {
+            let recv = receiver.lock().unwrap();
+            recv.is_complete() || recv.failed
+        };
+        if should_break {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;

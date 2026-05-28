@@ -78,6 +78,12 @@ pub async fn handle_data_connection(mut stream: TcpStream, local_port: u16) -> R
     let recv_timeout = frame::timeout_for_bytes(frame::MAX_PAYLOAD);
 
     loop {
+        // Abort if the transfer has already failed (e.g. disk I/O error)
+        if receiver.lock().unwrap().failed {
+            error!("Transfer aborted due to previous failure");
+            break;
+        }
+
         let data = match frame::recv_with_timeout(&mut stream, recv_timeout).await {
             Ok(d) => d,
             Err(_) => break,
@@ -255,7 +261,11 @@ fn verify_and_write_chunk(
 
     if chunk_hash_calc == *chunk_hash_rcvd {
         let part_path = receiver.lock().unwrap().part_path(chunk_index);
-        std::fs::write(&part_path, chunk_data)?;
+        if let Err(e) = std::fs::write(&part_path, chunk_data) {
+            error!("Failed to write chunk {}: {}", chunk_index, e);
+            receiver.lock().unwrap().failed = true;
+            return Ok(chunk::ACK_HASH_MISMATCH);
+        }
 
         {
             let mut recv = receiver.lock().unwrap();

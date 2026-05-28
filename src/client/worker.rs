@@ -85,7 +85,7 @@ pub async fn send_chunk(
                 tokio::time::sleep(Duration::from_millis(200 * (attempt + 1) as u64)).await;
                 continue;
             }
-            return Err(anyhow::anyhow!("hash mismatch"));
+            return Err(anyhow::anyhow!("chunk rejected by server"));
         }
     }
 
@@ -170,6 +170,8 @@ pub async fn worker(config: WorkerConfig) -> (Vec<usize>, Vec<usize>) {
                     }
                     Ok(false) | Err(_) => {
                         fail_list.push(idx);
+                        // Signal other workers to stop
+                        config.shutdown_flag.store(true, Ordering::SeqCst);
                     }
                 }
             }
