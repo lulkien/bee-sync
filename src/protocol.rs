@@ -36,6 +36,10 @@ pub mod frame {
     /// Size of the length-prefix header (4 bytes, big-endian u32)
     pub const HEADER_SIZE: usize = 4;
 
+    /// Maximum allowed payload size (16 MiB). Frames larger than this are
+    /// rejected to prevent memory-exhaustion attacks.
+    pub const MAX_PAYLOAD: usize = 16 * 1024 * 1024;
+
     /// Send a length-prefixed frame.
     pub async fn send<T: tokio::io::AsyncWrite + Unpin>(stream: &mut T, data: &[u8]) -> Result<()> {
         let len = data.len() as u32;
@@ -68,6 +72,13 @@ pub mod frame {
         let mut header = [0u8; HEADER_SIZE];
         stream.read_exact(&mut header).await?;
         let payload_len = u32::from_be_bytes(header) as usize;
+        if payload_len > MAX_PAYLOAD {
+            anyhow::bail!(
+                "frame payload {} exceeds maximum {}",
+                payload_len,
+                MAX_PAYLOAD
+            );
+        }
         if payload_len == 0 {
             return Ok(Vec::new());
         }

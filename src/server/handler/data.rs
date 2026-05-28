@@ -173,6 +173,18 @@ async fn process_chunk(
     ]);
     let chunk_size = u32::from_be_bytes([data[12], data[13], data[14], data[15]]) as usize;
 
+    // Validate chunk index against receiver's expected range
+    {
+        let num_chunks = receiver.lock().unwrap().num_chunks;
+        if chunk_index >= num_chunks {
+            error!(
+                "Chunk index {} out of range (num_chunks={})",
+                chunk_index, num_chunks
+            );
+            return Ok(());
+        }
+    }
+
     // Extract chunk data and MD5
     let chunk_data = data[chunk::HEADER_SIZE..chunk::HEADER_SIZE + chunk_size].to_vec();
     let chunk_md5_rcvd: [u8; 16] = data

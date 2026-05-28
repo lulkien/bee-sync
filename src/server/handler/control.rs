@@ -290,6 +290,18 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
         .try_into()
         .map_err(|_| anyhow::anyhow!("Invalid MD5 length"))?;
 
+    // Security: validate metadata ranges to prevent OOM / panics downstream
+    const MAX_CHUNKS: usize = 1_000_000;
+    if chunk_size == 0 {
+        anyhow::bail!("chunk_size must be > 0");
+    }
+    if num_chunks == 0 {
+        anyhow::bail!("num_chunks must be > 0");
+    }
+    if num_chunks > MAX_CHUNKS {
+        anyhow::bail!("num_chunks {} exceeds maximum {}", num_chunks, MAX_CHUNKS);
+    }
+
     Ok(HandshakeData {
         filename,
         safe_name,

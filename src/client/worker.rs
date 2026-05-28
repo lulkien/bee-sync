@@ -138,8 +138,17 @@ pub async fn worker(config: WorkerConfig) -> (Vec<usize>, Vec<usize>) {
                     continue;
                 }
 
-                let offset = idx as u64 * config.chunk_size as u64;
-                let actual_size = std::cmp::min(config.chunk_size, config.file_size as usize - offset as usize);
+                // Guard against overflow (idx * chunk_size) and underflow (file_size - offset)
+                let offset = match (idx as u64).checked_mul(config.chunk_size as u64) {
+                    Some(o) if o <= config.file_size => o,
+                    _ => {
+                        log::error!("Chunk {} offset overflow or out of range", idx);
+                        fail_list.push(idx);
+                        continue;
+                    }
+                };
+                let remaining = (config.file_size - offset) as usize;
+                let actual_size = std::cmp::min(config.chunk_size, remaining);
 
                 match send_chunk(&mut stream, &config.filepath, idx, offset, actual_size, config.retries).await {
                     Ok(true) => {
