@@ -82,7 +82,7 @@ Neither `TcpStream` nor TLS connections have read/write timeouts set. An attacke
 
 **Exploit:** Connect to any server port and idle.
 
-**Fix:** Use `tokio::time::timeout` on all `recv` calls, or set `SO_RCVTIMEO` / `TCP_USER_TIMEOUT` on sockets. Add an overall transfer timeout.
+**Status:** ✅ Fixed — all `frame::send`/`recv`/`send_parts` replaced with `*_timeout` variants (30s per operation). Persistent connections reset the clock per chunk. Server `Semaphore` caps concurrent connections at 128.
 
 ---
 
@@ -94,7 +94,7 @@ Every accepted control connection spawns an unbounded `tokio::spawn`. No connect
 
 **Exploit:** Open thousands of TCP connections to port 19999. Each spawns a task; combined with #6, each task lives indefinitely.
 
-**Fix:** Use a `Semaphore` or `tokio::sync::Semaphore` to limit concurrent control handler tasks.
+**Status:** ✅ Fixed — `Semaphore::new(MAX_CONCURRENT_CONNECTIONS=128)` in `run_server`. Excess connections are rejected with a log message.
 
 ---
 
@@ -106,7 +106,7 @@ A handshake with `num_chunks >= max_parallel` (default 100) binds up to 100 port
 
 **Exploit:** 10 concurrent handshakes with `num_chunks = 100` exhaust all 1000 data ports. New transfers fail with "Failed to allocate data port".
 
-**Fix:** Lower `MAX_PARALLEL` or add a global port-usage counter with a cap.
+**Status:** ✅ Fixed — global `PORT_POOL` semaphore (1001 permits). `allocate_sockets` reserves before binding; `cleanup` releases on completion. Transfers are rejected when the pool is exhausted.
 
 ---
 
@@ -213,7 +213,7 @@ A rogue server could send `num_ports = 255`, causing the client to attempt 255 d
 ### Summary
 
 | # | Severity | Issue | Exploitable by |
-|---|----------|-------|---------------|
+| - | -------- | ----- | -------------- |
 | 1 | Critical | `num_chunks` unbounded → OOM | Any remote client |
 | 2 | Critical | `recv_frame` 4 GB allocation → OOM | Any remote peer |
 | 3 | Critical | `chunk_index` OOB → panic | Any remote client |

@@ -32,6 +32,7 @@ use std::{
 
 use log::{error, info};
 use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
 use tokio_rustls::TlsAcceptor;
 
 mod file_receiver;
@@ -66,6 +67,32 @@ pub const CONTROL_PORT: u16 = 19999;
 
 /// Maximum parallel connections per transfer
 pub const MAX_PARALLEL: usize = 100;
+
+/// Maximum concurrent control connections (prevents connection-flood DoS)
+pub const MAX_CONCURRENT_CONNECTIONS: usize = 128;
+
+/// Total available data ports (45000–46000 inclusive)
+pub(super) const TOTAL_DATA_PORTS: usize = (DATA_PORT_END - DATA_PORT_START + 1) as usize;
+
+/// Global semaphore tracking available data ports to prevent exhaustion
+static PORT_POOL: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(TOTAL_DATA_PORTS));
+
+/// Try to reserve `count` data ports from the global pool.
+/// Returns true if reserved, false if insufficient ports are available.
+pub(super) fn try_reserve_ports(count: usize) -> bool {
+    match PORT_POOL.try_acquire_many(count as u32) {
+        Ok(permit) => {
+            permit.forget(); // released manually via release_ports
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Release `count` data ports back to the global pool.
+pub(super) fn release_ports(count: usize) {
+    PORT_POOL.add_permits(count);
+}
 
 /// Global registry mapping data ports to active FileReceivers
 ///
@@ -137,14 +164,23 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
 
     let output_dir = config.output_dir.clone();
     let max_parallel = config.max_parallel;
+    let conn_semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
 
     loop {
         match control_listener.accept().await {
             Ok((stream, addr)) => {
                 let _tls_ctx = tls_ctx.clone();
                 let output_dir = output_dir.clone();
+                let permit = match conn_semaphore.clone().try_acquire_owned() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        error!("Connection limit reached, rejecting {}", addr);
+                        continue;
+                    }
+                };
 
                 tokio::spawn(async move {
+                    let _permit = permit; // released on drop
                     let result = if let Some(ref ctx) = _tls_ctx {
                         let acceptor = TlsAcceptor::from(ctx.clone());
                         match acceptor.accept(stream).await {

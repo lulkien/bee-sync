@@ -19,7 +19,10 @@ use crate::{
 };
 
 use super::{
-    super::{DATA_PORT_END, DATA_PORT_START, FileReceiver, register_receivers, remove_receiver},
+    super::{
+        DATA_PORT_END, DATA_PORT_START, FileReceiver, TOTAL_DATA_PORTS, register_receivers,
+        release_ports, remove_receiver, try_reserve_ports,
+    },
     handle_data_connection,
 };
 
@@ -52,7 +55,7 @@ pub async fn handle_control_connection(
     max_parallel: usize,
 ) -> Result<()> {
     // Receive handshake frame
-    let data = match frame::recv(&mut stream).await {
+    let data = match frame::recv_timeout(&mut stream).await {
         Ok(d) => d,
         Err(_) => {
             error!("Failed to receive handshake");
@@ -139,7 +142,7 @@ pub async fn handle_control_connection(
         handshake::RESP_ERR
     };
 
-    if let Err(e) = frame::send(&mut stream, &[final_status]).await {
+    if let Err(e) = frame::send_timeout(&mut stream, &[final_status]).await {
         error!("Failed to send final status: {}", e);
     }
 
@@ -174,6 +177,15 @@ async fn allocate_sockets(
     let mut sockets = Vec::new();
     let mut port = DATA_PORT_START;
     let num_socks = count.min(max_parallel);
+
+    // Check global port availability before binding
+    if !try_reserve_ports(num_socks) {
+        return Err(format!(
+            "Not enough data ports available (need {}, have {})",
+            num_socks,
+            TOTAL_DATA_PORTS
+        ));
+    }
 
     for _ in 0..num_socks {
         while port <= DATA_PORT_END {
@@ -460,14 +472,18 @@ pub fn assemble_file(receiver: &Arc<Mutex<FileReceiver>>) -> Result<bool> {
 /// # Returns
 /// - `Ok(())`: Response sent successfully
 /// - `Err(e)`: Error sending response
-async fn send_handshake_response(stream: &mut (impl AsyncWrite + Unpin), status: u8, ports: &[u16]) -> Result<()> {
+async fn send_handshake_response(
+    stream: &mut (impl AsyncWrite + Unpin),
+    status: u8,
+    ports: &[u16],
+) -> Result<()> {
     let mut response = Vec::with_capacity(2 + ports.len() * 2);
     response.push(status);
     response.push(ports.len() as u8);
     for &port in ports {
         response.extend_from_slice(&port.to_be_bytes());
     }
-    frame::send(stream, &response).await?;
+    frame::send_timeout(stream, &response).await?;
     Ok(())
 }
 
@@ -479,8 +495,12 @@ async fn send_handshake_response(stream: &mut (impl AsyncWrite + Unpin), status:
 /// - `ports`: Vec of data port numbers
 /// - `data_tasks`: Vec of data server task handles
 pub fn cleanup(ports: &[u16], data_tasks: Vec<JoinHandle<()>>) {
+    let count = ports.len();
     for &port in ports {
         remove_receiver(port);
     }
     drop(data_tasks);
+    if count > 0 {
+        release_ports(count);
+    }
 }

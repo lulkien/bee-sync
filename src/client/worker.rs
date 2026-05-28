@@ -55,10 +55,21 @@ pub async fn send_chunk(
     header[4..12].copy_from_slice(&chunk_offset.to_be_bytes());
     header[12..16].copy_from_slice(&(actual_size as u32).to_be_bytes());
 
-    for attempt in 0..retries {
-        frame::send_parts(stream, &[&header, &chunk_data, &chunk_md5]).await?;
+    // Total bytes on the wire for this chunk: header + data + md5
+    let total_bytes = chunk::HEADER_SIZE + actual_size + chunk::MD5_SIZE;
 
-        let ack = frame::recv(stream).await?;
+    for attempt in 0..retries {
+        // Each retry gets more time (1x, 2x, 3x the base timeout)
+        let timeout = frame::timeout_for_bytes(total_bytes)
+            .saturating_mul((attempt + 1) as u32);
+
+        tokio::time::timeout(timeout, frame::send_parts(stream, &[&header, &chunk_data, &chunk_md5]))
+            .await
+            .map_err(|_| anyhow::anyhow!("send chunk {} timed out after {:?}", chunk_index, timeout))??;
+
+        let ack = tokio::time::timeout(timeout, frame::recv(stream))
+            .await
+            .map_err(|_| anyhow::anyhow!("ack recv for chunk {} timed out after {:?}", chunk_index, timeout))??;
         if ack.is_empty() {
             if attempt < retries - 1 {
                 tokio::time::sleep(Duration::from_millis(200 * (attempt + 1) as u64)).await;
@@ -83,8 +94,8 @@ pub async fn send_chunk(
 
 /// Query server which chunks already received
 pub async fn query_received(stream: &mut TcpStream) -> Result<HashSet<usize>> {
-    frame::send(stream, &[chunk::QUERY_MAGIC]).await?;
-    let resp = frame::recv(stream).await?;
+    frame::send_timeout(stream, &[chunk::QUERY_MAGIC]).await?;
+    let resp = frame::recv_timeout(stream).await?;
     if resp.len() < 4 {
         return Ok(HashSet::new());
     }

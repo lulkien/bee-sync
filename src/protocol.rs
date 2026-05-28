@@ -30,8 +30,10 @@
 ///
 /// Every wire message is wrapped in a 4-byte big-endian length prefix.
 pub mod frame {
+    use std::time::Duration;
+
     use anyhow::Result;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
     /// Size of the length-prefix header (4 bytes, big-endian u32)
     pub const HEADER_SIZE: usize = 4;
@@ -40,8 +42,24 @@ pub mod frame {
     /// rejected to prevent memory-exhaustion attacks.
     pub const MAX_PAYLOAD: usize = 16 * 1024 * 1024;
 
+    /// Per-operation timeout floor (30 seconds).
+    pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
+    /// Assumed minimum throughput in bytes per second (150 KB/s).
+    /// Used to compute dynamic timeouts for large chunk transfers.
+    pub const MIN_THROUGHPUT: u64 = 150 * 1024;
+
+    /// Compute a timeout that accounts for payload size at minimum throughput,
+    /// with a floor of `DEFAULT_TIMEOUT` and 5 seconds of padding.
+    pub fn timeout_for_bytes(n_bytes: usize) -> Duration {
+        let speed_time = Duration::from_secs(n_bytes as u64 / MIN_THROUGHPUT);
+        speed_time
+            .max(DEFAULT_TIMEOUT)
+            .saturating_add(Duration::from_secs(5))
+    }
+
     /// Send a length-prefixed frame.
-    pub async fn send<T: tokio::io::AsyncWrite + Unpin>(stream: &mut T, data: &[u8]) -> Result<()> {
+    pub async fn send<T: AsyncWrite + Unpin>(stream: &mut T, data: &[u8]) -> Result<()> {
         let len = data.len() as u32;
         let header = len.to_be_bytes();
         stream.write_all(&header).await?;
@@ -52,10 +70,7 @@ pub mod frame {
 
     /// Send a length-prefixed frame assembled from multiple buffers (single
     /// writev-style header — no per-part framing).
-    pub async fn send_parts<T: tokio::io::AsyncWrite + Unpin>(
-        stream: &mut T,
-        parts: &[&[u8]],
-    ) -> Result<()> {
+    pub async fn send_parts<T: AsyncWrite + Unpin>(stream: &mut T, parts: &[&[u8]]) -> Result<()> {
         let total_len: usize = parts.iter().map(|p| p.len()).sum();
         let header = (total_len as u32).to_be_bytes();
         stream.write_all(&header).await?;
@@ -68,7 +83,7 @@ pub mod frame {
 
     /// Receive a length-prefixed frame. Returns the payload bytes (empty vec
     /// for a zero-length frame).
-    pub async fn recv<T: tokio::io::AsyncRead + Unpin>(stream: &mut T) -> Result<Vec<u8>> {
+    pub async fn recv<T: AsyncRead + Unpin>(stream: &mut T) -> Result<Vec<u8>> {
         let mut header = [0u8; HEADER_SIZE];
         stream.read_exact(&mut header).await?;
         let payload_len = u32::from_be_bytes(header) as usize;
@@ -85,6 +100,28 @@ pub mod frame {
         let mut payload = vec![0u8; payload_len];
         stream.read_exact(&mut payload).await?;
         Ok(payload)
+    }
+
+    /// Send a frame with a per-operation timeout.
+    pub async fn send_timeout<T: AsyncWrite + Unpin>(stream: &mut T, data: &[u8]) -> Result<()> {
+        tokio::time::timeout(DEFAULT_TIMEOUT, send(stream, data))
+            .await
+            .map_err(|_| anyhow::anyhow!("send timed out after {:?}", DEFAULT_TIMEOUT))?
+    }
+
+    /// Receive a frame with a per-operation timeout.
+    pub async fn recv_timeout<T: AsyncRead + Unpin>(stream: &mut T) -> Result<Vec<u8>> {
+        recv_with_timeout(stream, DEFAULT_TIMEOUT).await
+    }
+
+    /// Receive a frame with an explicit timeout duration.
+    pub async fn recv_with_timeout<T: AsyncRead + Unpin>(
+        stream: &mut T,
+        timeout: Duration,
+    ) -> Result<Vec<u8>> {
+        tokio::time::timeout(timeout, recv(stream))
+            .await
+            .map_err(|_| anyhow::anyhow!("recv timed out after {:?}", timeout))?
     }
 }
 

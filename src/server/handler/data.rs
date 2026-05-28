@@ -74,8 +74,11 @@ pub async fn handle_data_connection(mut stream: TcpStream, local_port: u16) -> R
         receiver.lock().unwrap().filename
     );
 
+    // Use a generous timeout for chunk frames (based on max payload at min throughput)
+    let recv_timeout = frame::timeout_for_bytes(frame::MAX_PAYLOAD);
+
     loop {
-        let data = match frame::recv(&mut stream).await {
+        let data = match frame::recv_with_timeout(&mut stream, recv_timeout).await {
             Ok(d) => d,
             Err(_) => break,
         };
@@ -130,7 +133,7 @@ async fn handle_query(receiver: &Arc<Mutex<FileReceiver>>, stream: &mut TcpStrea
         resp.extend_from_slice(&(idx as u32).to_be_bytes());
     }
 
-    frame::send(stream, &resp).await?;
+    frame::send_timeout(stream, &resp).await?;
     Ok(())
 }
 
@@ -257,5 +260,5 @@ fn verify_and_write_chunk(
 /// - `Ok(())` on successful send
 /// - `Err(e)` on I/O error
 async fn send_ack(stream: &mut TcpStream, ack: u8) -> Result<()> {
-    frame::send(stream, &[ack]).await
+    frame::send_timeout(stream, &[ack]).await
 }

@@ -269,12 +269,12 @@ async fn perform_handshake(config: &ClientConfig) -> Result<(Box<dyn Stream>, u8
         }
     };
 
-    if let Err(e) = frame::send(&mut control_sock, &handshake_msg).await {
+    if let Err(e) = frame::send_timeout(&mut control_sock, &handshake_msg).await {
         log::error!("Failed to send handshake: {}", e);
         return Err(1);
     }
 
-    let response = match frame::recv(&mut control_sock).await {
+    let response = match frame::recv_timeout(&mut control_sock).await {
         Ok(r) => r,
         Err(e) => {
             log::error!("Failed to receive response: {}", e);
@@ -295,7 +295,7 @@ async fn perform_handshake(config: &ClientConfig) -> Result<(Box<dyn Stream>, u8
 
 /// Receive final transfer status from server after assembly
 async fn recv_final_status(stream: &mut (impl tokio::io::AsyncRead + Unpin)) -> Result<bool> {
-    let data = frame::recv(stream).await?;
+    let data = frame::recv_timeout(stream).await?;
     if data.is_empty() {
         return Ok(false);
     }
