@@ -135,6 +135,16 @@ pub async fn handle_control_connection(
         }
     };
 
+    // Send final status to client before cleanup
+    let final_status = if success {
+        RESP_STATUS_OK
+    } else {
+        RESP_STATUS_ERR
+    };
+    if let Err(e) = send_frame(&mut stream, &[final_status]).await {
+        error!("Failed to send final status: {}", e);
+    }
+
     // Cleanup
     cleanup(&ports, data_tasks);
 

@@ -27,7 +27,7 @@ use crate::{
 mod tls;
 mod worker;
 
-use tls::connect_to_server;
+use tls::{connect_to_server, Stream};
 use worker::{WorkerConfig, worker};
 
 /// Default chunk size: 5 MiB
@@ -58,8 +58,7 @@ pub async fn run_client(config: ClientConfig) -> i32 {
     let (file_size, num_chunks) = setup_transfer(&config);
 
     // Perform handshake
-    // Perform handshake
-    let (status, data_ports) = match perform_handshake(&config).await {
+    let (mut control_sock, status, data_ports) = match perform_handshake(&config).await {
         Ok(result) => result,
         Err(code) => return code,
     };
@@ -98,8 +97,22 @@ pub async fn run_client(config: ClientConfig) -> i32 {
         return 1;
     }
 
-    log::info!("All {} chunks sent successfully", num_chunks);
-    0
+    // Wait for server to confirm assembly
+    log::info!("All {} chunks sent, waiting for server confirmation...", num_chunks);
+    match recv_final_status(&mut control_sock).await {
+        Ok(true) => {
+            log::info!("Server confirmed transfer complete");
+            0
+        }
+        Ok(false) => {
+            log::error!("Server reported transfer failure");
+            1
+        }
+        Err(e) => {
+            log::error!("Failed to receive server confirmation: {}", e);
+            1
+        }
+    }
 }
 
 /// Build handshake message for given file
@@ -227,14 +240,14 @@ fn setup_transfer(config: &ClientConfig) -> (u64, usize) {
 /// * `config` - Client configuration
 ///
 /// # Returns
-/// * `Ok((status, data_ports))` - Server response status and available data ports
+/// * `Ok((control_sock, status, data_ports))` - Control socket, response status, and data ports
 /// * `Err(code)` - Exit code on failure (1)
 ///
 /// # Protocol Flow
 /// 1. Connect to server via TLS/TCP
 /// 2. Send handshake message with file metadata
 /// 3. Receive server response with status and data port list
-async fn perform_handshake(config: &ClientConfig) -> Result<(u8, Vec<u16>), i32> {
+async fn perform_handshake(config: &ClientConfig) -> Result<(Box<dyn Stream>, u8, Vec<u16>), i32> {
     log::info!("Connecting to {}:{}...", config.host, config.port);
     let mut control_sock = match connect_to_server(
         config.host.clone(),
@@ -280,7 +293,16 @@ async fn perform_handshake(config: &ClientConfig) -> Result<(u8, Vec<u16>), i32>
         }
     };
 
-    Ok((status, data_ports))
+    Ok((control_sock, status, data_ports))
+}
+
+/// Receive final transfer status from server after assembly
+async fn recv_final_status(stream: &mut (impl tokio::io::AsyncRead + Unpin)) -> Result<bool> {
+    let data = recv_frame(stream).await?;
+    if data.is_empty() {
+        return Ok(false);
+    }
+    Ok(data[0] == RESP_STATUS_OK)
 }
 
 /// Setup workers: distribute chunks, create progress bar, set up signal handling
