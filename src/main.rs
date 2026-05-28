@@ -70,17 +70,43 @@ async fn run_client(args: cli::ClientArgs) -> i32 {
         }
     };
 
-    let chunk_size = match utils::parse_chunk_size(&args.chunk_size) {
-        Ok(s) => s,
-        Err(e) => {
-            log::error!("Invalid chunk size: {}", e);
-            return 1;
-        }
+    let file_size = {
+        let meta = match std::fs::metadata(&filepath) {
+            Ok(m) => m,
+            Err(e) => {
+                log::error!("Failed to read file metadata: {}", e);
+                return 1;
+            }
+        };
+        meta.len()
     };
 
-    log::info!("Starting bee-sync client");
-    log::info!("Server: {}:{}", args.host, args.port);
-    log::info!("File: {} (chunk size: {})", filepath, chunk_size);
+    let chunk_size = if let Some(count) = args.chunk_count {
+        if count == 0 {
+            log::error!("Chunk count must be > 0");
+            return 1;
+        }
+        let cs = (file_size as usize).div_ceil(count);
+        log::info!("Starting bee-sync client");
+        log::info!("Server: {}:{}", args.host, args.port);
+        log::info!(
+            "File: {} ({} bytes, {} chunks of ~{} bytes each)",
+            filepath, file_size, count, cs
+        );
+        cs
+    } else {
+        let cs = match utils::parse_chunk_size(&args.chunk_size) {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("Invalid chunk size: {}", e);
+                return 1;
+            }
+        };
+        log::info!("Starting bee-sync client");
+        log::info!("Server: {}:{}", args.host, args.port);
+        log::info!("File: {} (chunk size: {})", filepath, cs);
+        cs
+    };
 
     let config = ClientConfig {
         host: args.host,

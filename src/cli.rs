@@ -76,6 +76,10 @@ pub struct ClientArgs {
     #[arg(long, default_value = client::DEFAULT_CHUNK_SIZE)]
     pub chunk_size: String,
 
+    /// Split file into N chunks instead of using --chunk-size
+    #[arg(long)]
+    pub chunk_count: Option<usize>,
+
     /// Max parallel connections
     #[arg(long, default_value_t = client::DEFAULT_PARALLEL)]
     pub parallel: usize,

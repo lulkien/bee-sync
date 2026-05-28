@@ -10,7 +10,7 @@ use anyhow::Result;
 use tokio::io::AsyncWriteExt;
 
 /// Protocol magic number
-pub const MAGIC: [u8; 4] = *b"PYSN";
+pub const MAGIC: [u8; 4] = *b"BESN";
 
 /// Query magic byte
 pub const QUERY_MAGIC: u8 = 0x01;

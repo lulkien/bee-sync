@@ -141,6 +141,7 @@ pub async fn handle_control_connection(
     } else {
         RESP_STATUS_ERR
     };
+
     if let Err(e) = send_frame(&mut stream, &[final_status]).await {
         error!("Failed to send final status: {}", e);
     }
@@ -172,14 +173,14 @@ pub async fn handle_control_connection(
 async fn allocate_sockets(
     count: usize,
     max_parallel: usize,
-) -> Result<Vec<(u16, tokio::net::TcpListener)>, String> {
+) -> Result<Vec<(u16, TcpListener)>, String> {
     let mut sockets = Vec::new();
     let mut port = DATA_PORT_START;
     let num_socks = count.min(max_parallel);
 
     for _ in 0..num_socks {
         while port <= DATA_PORT_END {
-            match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {
+            match TcpListener::bind(("0.0.0.0", port)).await {
                 Ok(listener) => {
                     sockets.push((port, listener));
                     port += 1;
@@ -209,7 +210,7 @@ async fn allocate_sockets(
 ///
 /// # Returns
 /// - Vec of port numbers in order
-fn sockets_to_ports(sockets: &[(u16, tokio::net::TcpListener)]) -> Vec<u16> {
+fn sockets_to_ports(sockets: &[(u16, TcpListener)]) -> Vec<u16> {
     sockets.iter().map(|(port, _)| *port).collect()
 }
 
@@ -232,14 +233,20 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
     }
 
     // Validate magic bytes
+    // Handshake layout:
+    //   data[0..4]     MAGIC        4-byte protocol identifier ("BESN")
+    //   data[4..6]     filename_len u16 big-endian, length of UTF-8 filename
+    //   data[6..]      filename     variable-length UTF-8 bytes (safe base name only)
+    //   then file metadata follows (see below)
     let magic: [u8; 4] = data[0..4]
         .try_into()
         .map_err(|_| anyhow::anyhow!("Invalid magic length"))?;
+
     if magic != MAGIC {
         anyhow::bail!("Bad MAGIC: {:?}", magic);
     }
 
-    // Extract filename
+    // Extract filename (safe base name, strips any directory components)
     let filename_len = u16::from_be_bytes([data[4], data[5]]) as usize;
     if data.len() < HANDSHAKE_PREFIX_SIZE + filename_len + HANDSHAKE_SUFFIX_SIZE {
         anyhow::bail!("Handshake too short for filename");
@@ -254,6 +261,11 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
         .to_string();
 
     // Extract file metadata
+    // Layout after filename (offset = MAGIC(4) + filename_len(2) + filename):
+    //   offset + 0..8   file_size    u64 big-endian, total bytes of the source file
+    //   offset + 8..12  chunk_size   u32 big-endian, max bytes per chunk (last may be smaller)
+    //   offset + 12..16 num_chunks   u32 big-endian, total number of chunks
+    //   offset + 16..32 full_md5     raw 16-byte MD5 digest of the complete source file
     let offset = offset + filename_len;
     let file_size = u64::from_be_bytes([
         data[offset],
