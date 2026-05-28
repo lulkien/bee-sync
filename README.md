@@ -42,7 +42,7 @@ bee-sync server [OPTIONS]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--port` | `19999` | Control port for handshake |
+| `--address` | `0.0.0.0:19999` | Bind address (host:port) |
 | `--output` | `./received/` | Directory to save received files |
 | `--cert` | — | TLS certificate (PEM) |
 | `--key` | — | TLS private key (PEM) |
@@ -58,8 +58,7 @@ bee-sync client --file PATH [OPTIONS]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--file` | *(required)* | File to send |
-| `--host` | `localhost` | Server host |
-| `--port` | `19999` | Control port |
+| `--address` | `localhost:19999` | Server address (host:port) |
 | `--chunk-size` | `5M` | Chunk size (e.g. `1M`, `10M`, `1G`) |
 | `--chunk-count` | — | Split into N chunks instead of using `--chunk-size` |
 | `--parallel` | `10` | Max parallel data connections |
@@ -83,8 +82,8 @@ bee-sync client --tls --tls-no-verify --file ubuntu.iso
 bee-sync client --chunk-count 8 --file largefile.bin
 
 # Custom server port and output directory
-bee-sync server --port 8080 --output /srv/staging
-bee-sync client --port 8080 --host myserver.local --file data.bin
+bee-sync server --address 0.0.0.0:8080 --output /srv/staging
+bee-sync client --address myserver.local:8080 --file data.bin
 ```
 
 ## Architecture

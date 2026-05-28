@@ -54,11 +54,20 @@ fn init_logging(verbose: bool) {
 }
 
 async fn run_server(args: cli::ServerArgs) -> i32 {
-    log::info!("Starting bee-sync server on port {}", args.port);
+    let (bind_host, port) = match utils::parse_address(&args.address) {
+        Ok((h, p)) => (h, p),
+        Err(e) => {
+            log::error!("Invalid --address: {}", e);
+            return 1;
+        }
+    };
+
+    log::info!("Starting bee-sync server on {}:{}", bind_host, port);
     log::info!("Output directory: {}", args.output);
 
     let config = ServerConfig {
-        port: args.port,
+        bind_host,
+        port,
         output_dir: args.output,
         certfile: args.cert,
         keyfile: args.key,
@@ -97,6 +106,14 @@ async fn run_client(args: cli::ClientArgs) -> i32 {
         meta.len()
     };
 
+    let (host, port) = match utils::parse_address(&args.address) {
+        Ok((h, p)) => (h, p),
+        Err(e) => {
+            log::error!("Invalid --address: {}", e);
+            return 1;
+        }
+    };
+
     let chunk_size = if let Some(count) = args.chunk_count {
         if count == 0 {
             log::error!("Chunk count must be > 0");
@@ -104,7 +121,7 @@ async fn run_client(args: cli::ClientArgs) -> i32 {
         }
         let cs = (file_size as usize).div_ceil(count);
         log::info!("Starting bee-sync client");
-        log::info!("Server: {}:{}", args.host, args.port);
+        log::info!("Server: {}:{}", host, port);
         log::info!(
             "File: {} ({} bytes, {} chunks of ~{} bytes each)",
             filepath,
@@ -122,14 +139,14 @@ async fn run_client(args: cli::ClientArgs) -> i32 {
             }
         };
         log::info!("Starting bee-sync client");
-        log::info!("Server: {}:{}", args.host, args.port);
+        log::info!("Server: {}:{}", host, port);
         log::info!("File: {} (chunk size: {})", filepath, cs);
         cs
     };
 
     let config = ClientConfig {
-        host: args.host,
-        port: args.port,
+        host,
+        port,
         filepath,
         chunk_size,
         parallel: args.parallel,

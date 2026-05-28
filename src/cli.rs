@@ -33,9 +33,9 @@ impl Commands {
 
 #[derive(Parser)]
 pub struct ServerArgs {
-    /// Control port
-    #[arg(long, default_value_t = server::CONTROL_PORT)]
-    pub port: u16,
+    /// Bind address (host:port)
+    #[arg(long, default_value = "0.0.0.0:19999")]
+    pub address: String,
 
     /// Output directory
     #[arg(long, default_value = "./received/")]
@@ -60,13 +60,9 @@ pub struct ServerArgs {
 
 #[derive(Parser)]
 pub struct ClientArgs {
-    /// Server host
-    #[arg(long, default_value = "localhost")]
-    pub host: String,
-
-    /// Control port
-    #[arg(long, default_value_t = server::CONTROL_PORT)]
-    pub port: u16,
+    /// Server address (host:port)
+    #[arg(long, default_value = "localhost:19999")]
+    pub address: String,
 
     /// File to send (required)
     #[arg(long)]

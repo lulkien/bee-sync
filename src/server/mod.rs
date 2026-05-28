@@ -44,6 +44,7 @@ use file_receiver::FileReceiver;
 /// Server configuration
 ///
 /// # Fields
+/// - `bind_host`: Host to bind to (default: 0.0.0.0)
 /// - `port`: Control port for handshake (default: 19999)
 /// - `output_dir`: Directory to save received files
 /// - `certfile`: Optional TLS certificate path for encrypted connections
@@ -51,6 +52,7 @@ use file_receiver::FileReceiver;
 /// - `max_parallel`: Maximum parallel data connections per transfer
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
+    pub bind_host: String,
     pub port: u16,
     pub output_dir: String,
     pub certfile: Option<String>,
@@ -61,9 +63,6 @@ pub struct ServerConfig {
 /// Data port range for parallel chunk transfer
 pub const DATA_PORT_START: u16 = 45000;
 pub const DATA_PORT_END: u16 = 46000;
-
-/// Control port for handshake connections
-pub const CONTROL_PORT: u16 = 19999;
 
 /// Maximum parallel connections per transfer
 pub const MAX_PARALLEL: usize = 100;
@@ -159,8 +158,9 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
         None
     };
 
-    let control_listener = TcpListener::bind(("0.0.0.0", config.port)).await?;
-    info!("Listening on 0.0.0.0:{}", config.port);
+    let bind_addr = (config.bind_host.as_str(), config.port);
+    let control_listener = TcpListener::bind(bind_addr).await?;
+    info!("Listening on {}:{}", config.bind_host, config.port);
 
     let output_dir = config.output_dir.clone();
     let max_parallel = config.max_parallel;

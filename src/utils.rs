@@ -2,6 +2,18 @@
 
 use anyhow::Result;
 
+/// Parse an address string in "host:port" format.
+/// Returns (host, port) on success.
+pub fn parse_address(addr: &str) -> Result<(String, u16)> {
+    let (host, port_str) = addr
+        .rsplit_once(':')
+        .ok_or_else(|| anyhow::anyhow!("Invalid address format: expected host:port, got '{}'", addr))?;
+    let port: u16 = port_str
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid port in address: '{}'", addr))?;
+    Ok((host.to_string(), port))
+}
+
 /// Parse chunk size string to bytes
 /// Supports suffixes: k, m, g (case-insensitive)
 pub fn parse_chunk_size(value: &str) -> Result<usize> {
