@@ -4,10 +4,10 @@ use clap::{Parser, Subcommand};
 
 use crate::{client, server};
 
-/// Rusync - File transfer tool with parallel chunked transfer
+/// bee-sync - File transfer tool with parallel chunked transfer
 #[derive(Parser)]
-#[command(name = "rusync")]
-#[command(about = "Rusync - File transfer tool with parallel chunked transfer", long_about = None)]
+#[command(name = "bee-sync")]
+#[command(about = "bee-sync - File transfer tool with parallel chunked transfer", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

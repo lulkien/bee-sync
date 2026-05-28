@@ -1,4 +1,4 @@
-//! File operations module for Rusync.
+//! File operations module for bee-sync.
 //!
 //! Provides MD5 calculation, chunk splitting, and file assembly.
 

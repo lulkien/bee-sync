@@ -1,4 +1,4 @@
-//! Protocol constants and framing for Rusync file transfer.
+//! Protocol constants and framing for bee-sync file transfer.
 //!
 //! Frame format: 4-byte big-endian length prefix followed by payload.
 //! Handshake: MAGIC(4) + filename_len(2,BE) + filename(UTF-8) + file_size(8,BE)

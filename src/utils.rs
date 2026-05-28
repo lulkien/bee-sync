@@ -1,4 +1,4 @@
-//! Utility functions for Rusync.
+//! Utility functions for bee-sync.
 
 use anyhow::Result;
 

@@ -1,4 +1,4 @@
-//! FileReceiver module for Rusync server.
+//! FileReceiver module for bee-sync server.
 //!
 //! Tracks state for a single incoming file transfer.
 

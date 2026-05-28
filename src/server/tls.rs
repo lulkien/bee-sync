@@ -1,4 +1,4 @@
-//! TLS module for Rusync server.
+//! TLS module for bee-sync server.
 //!
 //! Provides TLS context loading and configuration.
 

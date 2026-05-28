@@ -1,4 +1,4 @@
-//! Rusync client — sends files via parallel chunk connections.
+//! bee-sync client — sends files via parallel chunk connections.
 //!
 //! Architecture:
 //! - Control channel: single TCP/TLS connection for handshake (port 19999)

@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use log::{debug, error, info};
 use tokio::{
-    net::{TcpListener, TcpStream},
+    io::{AsyncRead, AsyncWrite},
+    net::TcpListener,
     task::JoinHandle,
 };
 
@@ -49,7 +50,7 @@ pub struct HandshakeData {
 /// - `Ok(())`: Transfer completed successfully
 /// - `Err(e)`: Error during handshake or transfer
 pub async fn handle_control_connection(
-    mut stream: TcpStream,
+    mut stream: impl AsyncRead + AsyncWrite + Unpin,
     output_dir: &str,
     max_parallel: usize,
 ) -> Result<()> {
@@ -428,7 +429,7 @@ pub fn assemble_file(receiver: &Arc<Mutex<FileReceiver>>) -> Result<bool> {
 /// # Returns
 /// - `Ok(())`: Response sent successfully
 /// - `Err(e)`: Error sending response
-async fn send_handshake_response(stream: &mut TcpStream, status: u8, ports: &[u16]) -> Result<()> {
+async fn send_handshake_response(stream: &mut (impl AsyncWrite + Unpin), status: u8, ports: &[u16]) -> Result<()> {
     let mut response = Vec::with_capacity(2 + ports.len() * 2);
     response.push(status);
     response.push(ports.len() as u8);

@@ -1,4 +1,4 @@
-//! Rusync - Rust implementation of PySync file transfer system
+//! bee-sync - Rust implementation of a file transfer system
 //!
 //! Architecture:
 //! - Control channel: single TCP/TLS connection for handshake (port 19999)
@@ -38,7 +38,7 @@ async fn main() {
 }
 
 async fn run_server(args: cli::ServerArgs) -> i32 {
-    log::info!("Starting Rusync server on port {}", args.port);
+    log::info!("Starting bee-sync server on port {}", args.port);
     log::info!("Output directory: {}", args.output);
 
     let config = ServerConfig {
@@ -78,7 +78,7 @@ async fn run_client(args: cli::ClientArgs) -> i32 {
         }
     };
 
-    log::info!("Starting Rusync client");
+    log::info!("Starting bee-sync client");
     log::info!("Server: {}:{}", args.host, args.port);
     log::info!("File: {} (chunk size: {})", filepath, chunk_size);
 

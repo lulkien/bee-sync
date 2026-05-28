@@ -1,4 +1,4 @@
-//! Sync Rusync server — receives files via parallel chunk connections.
+//! bee-sync server — receives files via parallel chunk connections.
 //!
 //! Architecture:
 //! - Control channel: single TCP/TLS connection for handshake (port 19999)
@@ -32,6 +32,7 @@ use std::{
 
 use log::{error, info};
 use tokio::net::TcpListener;
+use tokio_rustls::TlsAcceptor;
 
 mod file_receiver;
 mod handler;
@@ -144,10 +145,33 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
                 let output_dir = output_dir.clone();
 
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        handler::handle_control_connection(stream, &output_dir, max_parallel).await
-                    {
-                        error!("Error handling control connection from {}: {}", addr, e);
+                    let result = if let Some(ref ctx) = _tls_ctx {
+                        let acceptor = TlsAcceptor::from(ctx.clone());
+                        match acceptor.accept(stream).await {
+                            Ok(tls_stream) => {
+                                handler::handle_control_connection(
+                                    tls_stream, &output_dir, max_parallel,
+                                )
+                                .await
+                            }
+                            Err(e) => {
+                                error!(
+                                    "TLS handshake failed from {}: {}",
+                                    addr, e
+                                );
+                                return;
+                            }
+                        }
+                    } else {
+                        handler::handle_control_connection(stream, &output_dir, max_parallel)
+                            .await
+                    };
+
+                    if let Err(e) = result {
+                        error!(
+                            "Error handling control connection from {}: {}",
+                            addr, e
+                        );
                     }
                 });
             }

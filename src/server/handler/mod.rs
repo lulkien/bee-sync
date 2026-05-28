@@ -11,7 +11,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use rusync::server::handler;
+//! use bee_sync::server::handler;
 //! ```
 
 mod control;
