@@ -19,10 +19,7 @@ use tokio::net::TcpStream;
 
 use crate::{
     file_ops,
-    protocol::{
-        ACK_MD5_MISMATCH, ACK_OK, CHUNK_HEADER_SIZE, CHUNK_MD5_SIZE, QUERY_MAGIC, recv_frame,
-        send_frame,
-    },
+    protocol::{frame, chunk},
 };
 
 use super::super::{file_receiver::FileReceiver, get_receiver};
@@ -78,7 +75,7 @@ pub async fn handle_data_connection(mut stream: TcpStream, local_port: u16) -> R
     );
 
     loop {
-        let data = match recv_frame(&mut stream).await {
+        let data = match frame::recv(&mut stream).await {
             Ok(d) => d,
             Err(_) => break,
         };
@@ -88,7 +85,7 @@ pub async fn handle_data_connection(mut stream: TcpStream, local_port: u16) -> R
         }
 
         // Query: return list of received chunk indices
-        if data.len() == 1 && data[0] == QUERY_MAGIC {
+        if data.len() == 1 && data[0] == chunk::QUERY_MAGIC {
             handle_query(&receiver, &mut stream).await?;
             continue;
         }
@@ -133,7 +130,7 @@ async fn handle_query(receiver: &Arc<Mutex<FileReceiver>>, stream: &mut TcpStrea
         resp.extend_from_slice(&(idx as u32).to_be_bytes());
     }
 
-    send_frame(stream, &resp).await?;
+    frame::send(stream, &resp).await?;
     Ok(())
 }
 
@@ -164,7 +161,7 @@ async fn process_chunk(
     data: &[u8],
 ) -> Result<()> {
     // Validate chunk message length
-    if data.len() < CHUNK_HEADER_SIZE + CHUNK_MD5_SIZE {
+    if data.len() < chunk::HEADER_SIZE + chunk::MD5_SIZE {
         error!("Chunk message too short: {} bytes", data.len());
         return Ok(());
     }
@@ -177,9 +174,9 @@ async fn process_chunk(
     let chunk_size = u32::from_be_bytes([data[12], data[13], data[14], data[15]]) as usize;
 
     // Extract chunk data and MD5
-    let chunk_data = data[CHUNK_HEADER_SIZE..CHUNK_HEADER_SIZE + chunk_size].to_vec();
+    let chunk_data = data[chunk::HEADER_SIZE..chunk::HEADER_SIZE + chunk_size].to_vec();
     let chunk_md5_rcvd: [u8; 16] = data
-        [CHUNK_HEADER_SIZE + chunk_size..CHUNK_HEADER_SIZE + chunk_size + CHUNK_MD5_SIZE]
+        [chunk::HEADER_SIZE + chunk_size..chunk::HEADER_SIZE + chunk_size + chunk::MD5_SIZE]
         .try_into()
         .map_err(|_| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid chunk MD5 length")
@@ -229,10 +226,10 @@ fn verify_and_write_chunk(
             receiver.lock().unwrap().num_chunks,
             chunk_data.len()
         );
-        Ok(ACK_OK)
+        Ok(chunk::ACK_OK)
     } else {
         error!("Chunk {} MD5 mismatch", chunk_index);
-        Ok(ACK_MD5_MISMATCH)
+        Ok(chunk::ACK_MD5_MISMATCH)
     }
 }
 
@@ -248,5 +245,5 @@ fn verify_and_write_chunk(
 /// - `Ok(())` on successful send
 /// - `Err(e)` on I/O error
 async fn send_ack(stream: &mut TcpStream, ack: u8) -> Result<()> {
-    send_frame(stream, &[ack]).await
+    frame::send(stream, &[ack]).await
 }

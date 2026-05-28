@@ -18,10 +18,7 @@ use indicatif::ProgressStyle;
 
 use crate::{
     file_ops::file_md5,
-    protocol::{
-        HANDSHAKE_PREFIX_SIZE, HANDSHAKE_SUFFIX_SIZE, MAGIC, RESP_STATUS_EXISTS, RESP_STATUS_OK,
-        recv_frame, send_frame,
-    },
+    protocol::{frame, handshake},
 };
 
 mod tls;
@@ -64,11 +61,11 @@ pub async fn run_client(config: ClientConfig) -> i32 {
     };
 
     match status {
-        RESP_STATUS_EXISTS => {
+        handshake::RESP_EXISTS => {
             log::info!("File already exists on server, nothing to transfer");
             return 0;
         }
-        RESP_STATUS_OK => {
+        handshake::RESP_OK => {
             log::debug!("Data ports: {:?}", data_ports);
         }
         _ => {
@@ -119,7 +116,7 @@ pub async fn run_client(config: ClientConfig) -> i32 {
 ///
 /// Constructs a handshake frame containing file metadata for server negotiation.
 /// The frame format is:
-/// - 4 bytes: MAGIC constant
+/// - 4 bytes: handshake::MAGIC constant
 /// - 2 bytes: filename length (big-endian)
 /// - N bytes: filename (UTF-8)
 /// - 8 bytes: file size (big-endian)
@@ -152,8 +149,8 @@ pub async fn build_handshake(filepath: &str, chunk_size: usize) -> Result<Vec<u8
     let full_md5 = file_md5(filepath)?;
 
     let mut handshake =
-        Vec::with_capacity(HANDSHAKE_PREFIX_SIZE + filename_bytes.len() + HANDSHAKE_SUFFIX_SIZE);
-    handshake.extend_from_slice(&MAGIC);
+        Vec::with_capacity(handshake::PREFIX_SIZE + filename_bytes.len() + handshake::SUFFIX_SIZE);
+    handshake.extend_from_slice(&handshake::MAGIC);
     handshake.extend_from_slice(&(filename_bytes.len() as u16).to_be_bytes());
     handshake.extend_from_slice(&filename_bytes);
     handshake.extend_from_slice(&file_size.to_be_bytes());
@@ -272,12 +269,12 @@ async fn perform_handshake(config: &ClientConfig) -> Result<(Box<dyn Stream>, u8
         }
     };
 
-    if let Err(e) = send_frame(&mut control_sock, &handshake_msg).await {
+    if let Err(e) = frame::send(&mut control_sock, &handshake_msg).await {
         log::error!("Failed to send handshake: {}", e);
         return Err(1);
     }
 
-    let response = match recv_frame(&mut control_sock).await {
+    let response = match frame::recv(&mut control_sock).await {
         Ok(r) => r,
         Err(e) => {
             log::error!("Failed to receive response: {}", e);
@@ -298,11 +295,11 @@ async fn perform_handshake(config: &ClientConfig) -> Result<(Box<dyn Stream>, u8
 
 /// Receive final transfer status from server after assembly
 async fn recv_final_status(stream: &mut (impl tokio::io::AsyncRead + Unpin)) -> Result<bool> {
-    let data = recv_frame(stream).await?;
+    let data = frame::recv(stream).await?;
     if data.is_empty() {
         return Ok(false);
     }
-    Ok(data[0] == RESP_STATUS_OK)
+    Ok(data[0] == handshake::RESP_OK)
 }
 
 /// Setup workers: distribute chunks, create progress bar, set up signal handling

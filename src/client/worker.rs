@@ -16,7 +16,7 @@ use tokio::net::TcpStream;
 
 use crate::{
     file_ops::calc_md5,
-    protocol::{ACK_OK, CHUNK_HEADER_SIZE, QUERY_MAGIC, recv_frame, send_frame, send_frame_parts},
+    protocol::{frame, chunk},
 };
 
 /// Worker configuration
@@ -50,15 +50,15 @@ pub async fn send_chunk(
 
     let chunk_md5 = calc_md5(&chunk_data);
 
-    let mut header = vec![0u8; CHUNK_HEADER_SIZE];
+    let mut header = vec![0u8; chunk::HEADER_SIZE];
     header[0..4].copy_from_slice(&(chunk_index as u32).to_be_bytes());
     header[4..12].copy_from_slice(&chunk_offset.to_be_bytes());
     header[12..16].copy_from_slice(&(actual_size as u32).to_be_bytes());
 
     for attempt in 0..retries {
-        send_frame_parts(stream, &[&header, &chunk_data, &chunk_md5]).await?;
+        frame::send_parts(stream, &[&header, &chunk_data, &chunk_md5]).await?;
 
-        let ack = recv_frame(stream).await?;
+        let ack = frame::recv(stream).await?;
         if ack.is_empty() {
             if attempt < retries - 1 {
                 tokio::time::sleep(Duration::from_millis(200 * (attempt + 1) as u64)).await;
@@ -67,7 +67,7 @@ pub async fn send_chunk(
             return Err(anyhow::anyhow!("Empty ACK"));
         }
 
-        if ack[0] == ACK_OK {
+        if ack[0] == chunk::ACK_OK {
             return Ok(true);
         } else {
             if attempt < retries - 1 {
@@ -83,8 +83,8 @@ pub async fn send_chunk(
 
 /// Query server which chunks already received
 pub async fn query_received(stream: &mut TcpStream) -> Result<HashSet<usize>> {
-    send_frame(stream, &[QUERY_MAGIC]).await?;
-    let resp = recv_frame(stream).await?;
+    frame::send(stream, &[chunk::QUERY_MAGIC]).await?;
+    let resp = frame::recv(stream).await?;
     if resp.len() < 4 {
         return Ok(HashSet::new());
     }

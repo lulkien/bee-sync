@@ -15,10 +15,7 @@ use tokio::{
 
 use crate::{
     file_ops::file_md5,
-    protocol::{
-        HANDSHAKE_PREFIX_SIZE, HANDSHAKE_SUFFIX_SIZE, MAGIC, RESP_STATUS_ERR, RESP_STATUS_EXISTS,
-        RESP_STATUS_OK, recv_frame, send_frame,
-    },
+    protocol::{frame, handshake},
 };
 
 use super::{
@@ -55,7 +52,7 @@ pub async fn handle_control_connection(
     max_parallel: usize,
 ) -> Result<()> {
     // Receive handshake frame
-    let data = match recv_frame(&mut stream).await {
+    let data = match frame::recv(&mut stream).await {
         Ok(d) => d,
         Err(_) => {
             error!("Failed to receive handshake");
@@ -73,7 +70,7 @@ pub async fn handle_control_connection(
         Ok(h) => h,
         Err(e) => {
             error!("Handshake validation failed: {}", e);
-            send_handshake_response(&mut stream, RESP_STATUS_ERR, &[]).await?;
+            send_handshake_response(&mut stream, handshake::RESP_ERR, &[]).await?;
             return Ok(());
         }
     };
@@ -86,7 +83,7 @@ pub async fn handle_control_connection(
     // Check if file already exists and matches
     if check_existing_file(output_dir, &handshake.safe_name, &handshake.full_md5)? {
         info!("File {} already exists, skipping", handshake.safe_name);
-        send_handshake_response(&mut stream, RESP_STATUS_EXISTS, &[]).await?;
+        send_handshake_response(&mut stream, handshake::RESP_EXISTS, &[]).await?;
         return Ok(());
     }
 
@@ -95,7 +92,7 @@ pub async fn handle_control_connection(
         Ok(sockets) => sockets,
         Err(e) => {
             error!("Failed to allocate data ports: {}", e);
-            send_handshake_response(&mut stream, RESP_STATUS_ERR, &[]).await?;
+            send_handshake_response(&mut stream, handshake::RESP_ERR, &[]).await?;
             return Ok(());
         }
     };
@@ -115,7 +112,7 @@ pub async fn handle_control_connection(
     register_receivers(&data_socks, receiver.clone());
 
     // Send handshake response with data ports
-    send_handshake_response(&mut stream, RESP_STATUS_OK, &ports).await?;
+    send_handshake_response(&mut stream, handshake::RESP_OK, &ports).await?;
 
     // Scan existing .part files for resume
     scan_existing_parts(&mut receiver.lock().unwrap(), handshake.num_chunks);
@@ -137,12 +134,12 @@ pub async fn handle_control_connection(
 
     // Send final status to client before cleanup
     let final_status = if success {
-        RESP_STATUS_OK
+        handshake::RESP_OK
     } else {
-        RESP_STATUS_ERR
+        handshake::RESP_ERR
     };
 
-    if let Err(e) = send_frame(&mut stream, &[final_status]).await {
+    if let Err(e) = frame::send(&mut stream, &[final_status]).await {
         error!("Failed to send final status: {}", e);
     }
 
@@ -224,11 +221,11 @@ fn sockets_to_ports(sockets: &[(u16, TcpListener)]) -> Vec<u16> {
 /// - `Err(String)`: Validation error with message
 pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
     // Validate minimum frame length
-    if data.len() < HANDSHAKE_PREFIX_SIZE + HANDSHAKE_SUFFIX_SIZE {
+    if data.len() < handshake::PREFIX_SIZE + handshake::SUFFIX_SIZE {
         anyhow::bail!(
             "Handshake too short: {} bytes (minimum {})",
             data.len(),
-            HANDSHAKE_PREFIX_SIZE + HANDSHAKE_SUFFIX_SIZE
+            handshake::PREFIX_SIZE + handshake::SUFFIX_SIZE
         );
     }
 
@@ -242,17 +239,17 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
         .try_into()
         .map_err(|_| anyhow::anyhow!("Invalid magic length"))?;
 
-    if magic != MAGIC {
+    if magic != handshake::MAGIC {
         anyhow::bail!("Bad MAGIC: {:?}", magic);
     }
 
     // Extract filename (safe base name, strips any directory components)
     let filename_len = u16::from_be_bytes([data[4], data[5]]) as usize;
-    if data.len() < HANDSHAKE_PREFIX_SIZE + filename_len + HANDSHAKE_SUFFIX_SIZE {
+    if data.len() < handshake::PREFIX_SIZE + filename_len + handshake::SUFFIX_SIZE {
         anyhow::bail!("Handshake too short for filename");
     }
 
-    let offset = HANDSHAKE_PREFIX_SIZE;
+    let offset = handshake::PREFIX_SIZE;
     let filename = String::from_utf8_lossy(&data[offset..offset + filename_len]).to_string();
     let safe_name = std::path::Path::new(&filename)
         .file_name()
@@ -261,7 +258,7 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
         .to_string();
 
     // Extract file metadata
-    // Layout after filename (offset = MAGIC(4) + filename_len(2) + filename):
+    // Layout after filename (offset = handshake::MAGIC(4) + filename_len(2) + filename):
     //   offset + 0..8   file_size    u64 big-endian, total bytes of the source file
     //   offset + 8..12  chunk_size   u32 big-endian, max bytes per chunk (last may be smaller)
     //   offset + 12..16 num_chunks   u32 big-endian, total number of chunks
@@ -439,7 +436,7 @@ pub fn assemble_file(receiver: &Arc<Mutex<FileReceiver>>) -> Result<bool> {
 /// Send handshake response to client
 ///
 /// Response format:
-/// - 1 byte: status code (RESP_STATUS_OK/ERR/EXISTS)
+/// - 1 byte: status code (handshake::RESP_OK/ERR/EXISTS)
 /// - 1 byte: number of data ports
 /// - N*2 bytes: port numbers (big-endian)
 ///
@@ -458,7 +455,7 @@ async fn send_handshake_response(stream: &mut (impl AsyncWrite + Unpin), status:
     for &port in ports {
         response.extend_from_slice(&port.to_be_bytes());
     }
-    send_frame(stream, &response).await?;
+    frame::send(stream, &response).await?;
     Ok(())
 }
 
