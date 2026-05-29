@@ -32,7 +32,7 @@
 pub mod frame {
     use std::time::Duration;
 
-    use anyhow::Result;
+    use anyhow::{Result, bail};
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
     /// Size of the length-prefix header (4 bytes, big-endian u32)
@@ -53,6 +53,7 @@ pub mod frame {
     /// with a floor of `DEFAULT_TIMEOUT` and 5 seconds of padding.
     pub fn timeout_for_bytes(n_bytes: usize) -> Duration {
         let speed_time = Duration::from_secs(n_bytes as u64 / MIN_THROUGHPUT);
+
         speed_time
             .max(DEFAULT_TIMEOUT)
             .saturating_add(Duration::from_secs(5))
@@ -62,9 +63,11 @@ pub mod frame {
     pub async fn send<T: AsyncWrite + Unpin>(stream: &mut T, data: &[u8]) -> Result<()> {
         let len = data.len() as u32;
         let header = len.to_be_bytes();
+
         stream.write_all(&header).await?;
         stream.write_all(data).await?;
         stream.flush().await?;
+
         Ok(())
     }
 
@@ -73,11 +76,15 @@ pub mod frame {
     pub async fn send_parts<T: AsyncWrite + Unpin>(stream: &mut T, parts: &[&[u8]]) -> Result<()> {
         let total_len: usize = parts.iter().map(|p| p.len()).sum();
         let header = (total_len as u32).to_be_bytes();
+
         stream.write_all(&header).await?;
+
         for part in parts {
             stream.write_all(part).await?;
         }
+
         stream.flush().await?;
+
         Ok(())
     }
 
@@ -85,20 +92,27 @@ pub mod frame {
     /// for a zero-length frame).
     pub async fn recv<T: AsyncRead + Unpin>(stream: &mut T) -> Result<Vec<u8>> {
         let mut header = [0u8; HEADER_SIZE];
+
         stream.read_exact(&mut header).await?;
+
         let payload_len = u32::from_be_bytes(header) as usize;
+
         if payload_len > MAX_PAYLOAD {
-            anyhow::bail!(
+            bail!(
                 "frame payload {} exceeds maximum {}",
                 payload_len,
                 MAX_PAYLOAD
             );
         }
+
         if payload_len == 0 {
             return Ok(Vec::new());
         }
+
         let mut payload = vec![0u8; payload_len];
+
         stream.read_exact(&mut payload).await?;
+
         Ok(payload)
     }
 

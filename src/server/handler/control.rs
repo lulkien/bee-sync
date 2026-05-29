@@ -5,10 +5,11 @@
 
 use std::{
     fs,
-    sync::{Arc, Mutex},
+    path::Path,
+    sync::{Arc, Mutex}, time::Duration,
 };
 
-use anyhow::Result;
+use anyhow::{Result, anyhow, bail};
 use log::{debug, error, info};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -95,17 +96,17 @@ pub async fn handle_control_connection(
     }
 
     // Ensure output and temp directories exist before accepting the transfer
-    if let Err(e) = std::fs::create_dir_all(output_dir) {
+    if let Err(e) = fs::create_dir_all(output_dir) {
         error!("Output directory unavailable: {}", e);
         send_handshake_response(&mut stream, handshake::RESP_ERR, &[]).await?;
         return Ok(());
     }
-    if temp_dir != output_dir {
-        if let Err(e) = std::fs::create_dir_all(temp_dir) {
-            error!("Temp directory unavailable: {}", e);
-            send_handshake_response(&mut stream, handshake::RESP_ERR, &[]).await?;
-            return Ok(());
-        }
+    if temp_dir != output_dir
+        && let Err(e) = fs::create_dir_all(temp_dir)
+    {
+        error!("Temp directory unavailable: {}", e);
+        send_handshake_response(&mut stream, handshake::RESP_ERR, &[]).await?;
+        return Ok(());
     }
 
     // Allocate data ports for parallel transfer
@@ -266,7 +267,7 @@ fn sockets_to_ports(sockets: &[(u16, TcpListener)]) -> Vec<u16> {
 pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
     // Validate minimum frame length
     if data.len() < handshake::PREFIX_SIZE + handshake::SUFFIX_SIZE {
-        anyhow::bail!(
+        bail!(
             "Handshake too short: {} bytes (minimum {})",
             data.len(),
             handshake::PREFIX_SIZE + handshake::SUFFIX_SIZE
@@ -281,10 +282,10 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
     //   then file metadata follows (see below)
     let magic: [u8; 4] = data[0..4]
         .try_into()
-        .map_err(|_| anyhow::anyhow!("Invalid magic length"))?;
+        .map_err(|_| anyhow!("Invalid magic length"))?;
 
     if magic != handshake::MAGIC {
-        anyhow::bail!("Bad MAGIC: {:?}", magic);
+        bail!("Bad MAGIC: {:?}", magic);
     }
 
     // Extract filename (safe base name, strips any directory components)
@@ -293,7 +294,7 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
     // Cap filename length to common filesystem limit (255 bytes)
     const MAX_FILENAME_LEN: usize = 255;
     if filename_len > MAX_FILENAME_LEN {
-        anyhow::bail!(
+        bail!(
             "filename too long: {} bytes (max {})",
             filename_len,
             MAX_FILENAME_LEN
@@ -301,14 +302,14 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
     }
 
     if data.len() < handshake::PREFIX_SIZE + filename_len + handshake::SUFFIX_SIZE {
-        anyhow::bail!("Handshake too short for filename");
+        bail!("Handshake too short for filename");
     }
 
     let offset = handshake::PREFIX_SIZE;
     let filename = String::from_utf8_lossy(&data[offset..offset + filename_len]).to_string();
-    let safe_name = std::path::Path::new(&filename)
+    let safe_name = Path::new(&filename)
         .file_name()
-        .ok_or_else(|| anyhow::anyhow!("Invalid filename"))?
+        .ok_or_else(|| anyhow!("Invalid filename"))?
         .to_string_lossy()
         .to_string();
 
@@ -319,6 +320,7 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
     //   offset + 12..16 num_chunks   u32 big-endian, total number of chunks
     //   offset + 16..48 full_hash    raw 32-byte BLAKE3 hash of the complete source file
     let offset = offset + filename_len;
+
     let file_size = u64::from_be_bytes([
         data[offset],
         data[offset + 1],
@@ -329,32 +331,35 @@ pub fn parse_handshake(data: &[u8]) -> Result<HandshakeData> {
         data[offset + 6],
         data[offset + 7],
     ]);
+
     let chunk_size = u32::from_be_bytes([
         data[offset + 8],
         data[offset + 9],
         data[offset + 10],
         data[offset + 11],
     ]) as usize;
+
     let num_chunks = u32::from_be_bytes([
         data[offset + 12],
         data[offset + 13],
         data[offset + 14],
         data[offset + 15],
     ]) as usize;
+
     let full_hash: [u8; 32] = data[offset + 16..offset + 48]
         .try_into()
-        .map_err(|_| anyhow::anyhow!("Invalid hash length"))?;
+        .map_err(|_| anyhow!("Invalid hash length"))?;
 
     // Security: validate metadata ranges to prevent OOM / panics downstream
     const MAX_CHUNKS: usize = 1_000_000;
     if chunk_size == 0 {
-        anyhow::bail!("chunk_size must be > 0");
+        bail!("chunk_size must be > 0");
     }
     if num_chunks == 0 {
-        anyhow::bail!("num_chunks must be > 0");
+        bail!("num_chunks must be > 0");
     }
     if num_chunks > MAX_CHUNKS {
-        anyhow::bail!("num_chunks {} exceeds maximum {}", num_chunks, MAX_CHUNKS);
+        bail!("num_chunks {} exceeds maximum {}", num_chunks, MAX_CHUNKS);
     }
 
     Ok(HandshakeData {
@@ -384,11 +389,13 @@ pub fn check_existing_file(
     expected_hash: &[u8; 32],
 ) -> Result<bool> {
     let final_path = format!("{}/{}", output_dir, safe_name);
+
     if !fs::exists(&final_path)? {
         return Ok(false);
     }
 
     let existing_hash = file_hash(&final_path)?;
+
     Ok(existing_hash == *expected_hash)
 }
 
@@ -428,6 +435,7 @@ pub fn create_receiver(
 pub fn scan_existing_parts(receiver: &mut FileReceiver, num_chunks: usize) {
     for i in 0..num_chunks {
         let part_path = receiver.part_path(i);
+
         if fs::exists(&part_path).unwrap_or(false) {
             receiver.received_chunks[i] = true;
         }
@@ -485,10 +493,12 @@ pub async fn wait_for_completion(receiver: &Arc<Mutex<FileReceiver>>) {
             let recv = receiver.lock().unwrap();
             recv.is_complete() || recv.failed
         };
+
         if should_break {
             break;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
 
@@ -525,12 +535,16 @@ async fn send_handshake_response(
     ports: &[u16],
 ) -> Result<()> {
     let mut response = Vec::with_capacity(2 + ports.len() * 2);
+
     response.push(status);
     response.push(ports.len() as u8);
+
     for &port in ports {
         response.extend_from_slice(&port.to_be_bytes());
     }
+
     frame::send_timeout(stream, &response).await?;
+
     Ok(())
 }
 
@@ -543,10 +557,13 @@ async fn send_handshake_response(
 /// - `data_tasks`: Vec of data server task handles
 pub fn cleanup(ports: &[u16], data_tasks: Vec<JoinHandle<()>>) {
     let count = ports.len();
+
     for &port in ports {
         remove_receiver(port);
     }
+
     drop(data_tasks);
+
     if count > 0 {
         release_ports(count);
     }

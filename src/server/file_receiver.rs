@@ -2,7 +2,11 @@
 //!
 //! Tracks state for a single incoming file transfer.
 
-use std::{fs, io::Write, path::Path};
+use std::{
+    fs::{self, File},
+    io::{Read, Write},
+    path::Path,
+};
 
 use anyhow::Result;
 
@@ -60,14 +64,12 @@ impl FileReceiver {
     }
 
     pub fn assemble(&self) -> Result<bool> {
-        use std::io::Read;
-
         let final_path = Path::new(&self.output_dir).join(&self.filename);
         let part_path =
             |i: usize| Path::new(&self.parts_dir).join(format!("{}.part{}", self.filename, i));
 
         let mut hasher = blake3::Hasher::new();
-        let mut out = std::fs::File::create(&final_path)?;
+        let mut out = File::create(&final_path)?;
 
         for i in 0..self.num_chunks {
             let part = part_path(i);
@@ -75,7 +77,7 @@ impl FileReceiver {
                 return Ok(false);
             }
 
-            let mut part_file = std::fs::File::open(&part)?;
+            let mut part_file = File::open(&part)?;
             let mut buffer = [0u8; 65536];
             loop {
                 let n = part_file.read(&mut buffer)?;

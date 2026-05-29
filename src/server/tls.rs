@@ -4,7 +4,7 @@
 
 use std::{fs::File, io::BufReader, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use rustls::{ServerConfig, pki_types::CertificateDer};
 
 /// Load TLS context from cert and key files
@@ -18,7 +18,7 @@ pub fn load_tls_context(certfile: &str, keyfile: &str) -> Result<Arc<ServerConfi
     let keys = rustls_pemfile::private_key(&mut key_reader)?;
     let key = match keys {
         Some(k) => k,
-        None => return Err(anyhow::anyhow!("No private key found")),
+        None => return Err(anyhow!("No private key found")),
     };
 
     let config = ServerConfig::builder()

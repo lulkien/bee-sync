@@ -15,9 +15,6 @@
 //!
 //! - [`ServerConfig`]: Server configuration struct
 //! - [`run_server()`]: Main server entry point
-//! - [`handle_control_connection()`]: Handles handshake and transfer coordination
-//! - [`handle_data_connection()`]: Receives individual chunks
-//! - [`FileReceiver`]: Manages state for a single file transfer
 //!
 //! # Thread Safety
 //!

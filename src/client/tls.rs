@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use rustls::{
     ClientConfig, DigitallySignedStruct, Error, RootCertStore,
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
@@ -76,29 +77,30 @@ pub async fn connect_to_server(
     use_tls: bool,
     tls_no_verify: bool,
 ) -> anyhow::Result<Box<dyn Stream>> {
-    if use_tls {
-        let mut config = ClientConfig::builder()
-            .with_root_certificates(RootCertStore::from_iter(
-                webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
-            ))
-            .with_no_client_auth();
-
-        if tls_no_verify {
-            config
-                .dangerous()
-                .set_certificate_verifier(Arc::new(NoCertVerifier));
-        }
-
-        let connector = TlsConnector::from(Arc::new(config));
-        let dns_name = ServerName::try_from(host.clone())?;
-        let stream = TcpStream::connect((host.as_str(), port)).await?;
-        let tls_stream = connector.connect(dns_name, stream).await?;
-
-        Ok(Box::new(tls_stream))
-    } else {
+    if !use_tls {
         let stream = TcpStream::connect((host.as_str(), port))
             .await
-            .map_err(|e| anyhow::anyhow!("Connection failed: {}", e))?;
-        Ok(Box::new(stream))
+            .map_err(|e| anyhow!("Connection failed: {}", e))?;
+
+        return Ok(Box::new(stream));
     }
+
+    let mut config = ClientConfig::builder()
+        .with_root_certificates(RootCertStore::from_iter(
+            webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
+        ))
+        .with_no_client_auth();
+
+    if tls_no_verify {
+        config
+            .dangerous()
+            .set_certificate_verifier(Arc::new(NoCertVerifier));
+    }
+
+    let connector = TlsConnector::from(Arc::new(config));
+    let dns_name = ServerName::try_from(host.clone())?;
+    let stream = TcpStream::connect((host.as_str(), port)).await?;
+    let tls_stream = connector.connect(dns_name, stream).await?;
+
+    Ok(Box::new(tls_stream))
 }

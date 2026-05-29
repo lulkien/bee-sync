@@ -13,8 +13,9 @@ use std::{
     },
 };
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use indicatif::ProgressStyle;
+use log::{debug, error, info};
 
 use crate::{
     file_ops::file_hash,
@@ -61,15 +62,15 @@ pub async fn run_client(config: ClientConfig) -> i32 {
     };
 
     match status {
+        handshake::RESP_OK => {
+            debug!("Data ports: {:?}", data_ports);
+        }
         handshake::RESP_EXISTS => {
-            log::info!("File already exists on server, nothing to transfer");
+            info!("File already exists on server, nothing to transfer");
             return 0;
         }
-        handshake::RESP_OK => {
-            log::debug!("Data ports: {:?}", data_ports);
-        }
         _ => {
-            log::error!("Server rejected handshake (status={})", status);
+            error!("Server rejected handshake (status={})", status);
             return 1;
         }
     };
@@ -90,26 +91,27 @@ pub async fn run_client(config: ClientConfig) -> i32 {
     .await;
 
     if !all_failed.is_empty() {
-        log::error!("Failed chunks: {:?}", all_failed);
+        error!("Failed chunks: {:?}", all_failed);
         return 1;
     }
 
     // Wait for server to confirm assembly
-    log::info!(
+    info!(
         "All {} chunks sent, waiting for server confirmation...",
         num_chunks
     );
+
     match recv_final_status(&mut control_sock).await {
         Ok(true) => {
-            log::info!("Server confirmed transfer complete");
+            info!("Server confirmed transfer complete");
             0
         }
         Ok(false) => {
-            log::error!("Server reported transfer failure");
+            error!("Server reported transfer failure");
             1
         }
         Err(e) => {
-            log::error!("Failed to receive server confirmation: {}", e);
+            error!("Failed to receive server confirmation: {}", e);
             1
         }
     }
@@ -137,12 +139,12 @@ pub async fn run_client(config: ClientConfig) -> i32 {
 pub async fn build_handshake(filepath: &str, chunk_size: usize) -> Result<Vec<u8>> {
     let filename = std::path::Path::new(filepath)
         .file_name()
-        .ok_or(anyhow::anyhow!("Invalid filename"))?
+        .ok_or(anyhow!("Invalid filename"))?
         .to_string_lossy()
         .to_string();
     let filename_bytes = filename.into_bytes();
     let file_size = fs::metadata(filepath)
-        .map_err(|e| anyhow::anyhow!("Failed to get file size: {}", e))?
+        .map_err(|e| anyhow!("Failed to get file size: {}", e))?
         .len();
     let num_chunks = if file_size > 0 {
         (file_size as usize).div_ceil(chunk_size)
@@ -180,19 +182,24 @@ pub async fn build_handshake(filepath: &str, chunk_size: usize) -> Result<Vec<u8
 /// * `Err(e)` - Error if response format is invalid
 pub fn parse_response(data: &[u8]) -> Result<(u8, Vec<u16>)> {
     if data.len() < 2 {
-        return Err(anyhow::anyhow!("Response too short"));
+        return Err(anyhow!("Response too short"));
     }
+
     let status = data[0];
     let num_ports = data[1] as usize;
+
     if data.len() < 2 + num_ports * 2 {
-        return Err(anyhow::anyhow!("Response too short for ports"));
+        return Err(anyhow!("Response too short for ports"));
     }
+
     let mut ports = Vec::with_capacity(num_ports);
+
     for i in 0..num_ports {
         let offset = 2 + i * 2;
         let port = u16::from_be_bytes([data[offset], data[offset + 1]]);
         ports.push(port);
     }
+
     Ok((status, ports))
 }
 
@@ -208,13 +215,14 @@ pub fn parse_response(data: &[u8]) -> Result<(u8, Vec<u16>)> {
 /// * Exits with code 1 if file not found
 fn setup_transfer(config: &ClientConfig) -> (u64, usize) {
     if !std::path::Path::new(&config.filepath).is_file() {
-        log::error!("File not found: {}", config.filepath);
+        error!("File not found: {}", config.filepath);
         std::process::exit(1);
     }
 
     let file_size = std::fs::metadata(&config.filepath)
         .map(|m| m.len())
         .unwrap_or(0);
+
     let num_chunks = if file_size > 0 {
         (file_size as usize).div_ceil(config.chunk_size)
     } else {
@@ -241,7 +249,8 @@ fn setup_transfer(config: &ClientConfig) -> (u64, usize) {
 /// 2. Send handshake message with file metadata
 /// 3. Receive server response with status and data port list
 async fn perform_handshake(config: &ClientConfig) -> Result<(Box<dyn Stream>, u8, Vec<u16>), i32> {
-    log::info!("Connecting to {}:{}...", config.host, config.port);
+    info!("Connecting to {}:{}...", config.host, config.port);
+
     let mut control_sock = match connect_to_server(
         config.host.clone(),
         config.port,
@@ -249,10 +258,11 @@ async fn perform_handshake(config: &ClientConfig) -> Result<(Box<dyn Stream>, u8
         config.tls_no_verify,
     )
     .await
+
     {
         Ok(s) => s,
         Err(e) => {
-            log::error!("Failed to connect: {}", e);
+            error!("Failed to connect: {}", e);
             return Err(1);
         }
     };
@@ -260,20 +270,20 @@ async fn perform_handshake(config: &ClientConfig) -> Result<(Box<dyn Stream>, u8
     let handshake_msg = match build_handshake(&config.filepath, config.chunk_size).await {
         Ok(m) => m,
         Err(e) => {
-            log::error!("Failed to build handshake: {}", e);
+            error!("Failed to build handshake: {}", e);
             return Err(1);
         }
     };
 
     if let Err(e) = frame::send_timeout(&mut control_sock, &handshake_msg).await {
-        log::error!("Failed to send handshake: {}", e);
+        error!("Failed to send handshake: {}", e);
         return Err(1);
     }
 
     let response = match frame::recv_timeout(&mut control_sock).await {
         Ok(r) => r,
         Err(e) => {
-            log::error!("Failed to receive response: {}", e);
+            error!("Failed to receive response: {}", e);
             return Err(1);
         }
     };
@@ -281,7 +291,7 @@ async fn perform_handshake(config: &ClientConfig) -> Result<(Box<dyn Stream>, u8
     let (status, data_ports) = match parse_response(&response) {
         Ok((s, p)) => (s, p),
         Err(e) => {
-            log::error!("Failed to parse response: {}", e);
+            error!("Failed to parse response: {}", e);
             return Err(1);
         }
     };
@@ -292,9 +302,11 @@ async fn perform_handshake(config: &ClientConfig) -> Result<(Box<dyn Stream>, u8
 /// Receive final transfer status from server after assembly
 async fn recv_final_status(stream: &mut (impl tokio::io::AsyncRead + Unpin)) -> Result<bool> {
     let data = frame::recv_timeout(stream).await?;
+
     if data.is_empty() {
         return Ok(false);
     }
+
     Ok(data[0] == handshake::RESP_OK)
 }
 
@@ -328,6 +340,7 @@ fn setup_workers(
     // Distribute chunks across workers (round-robin)
     let num_workers = std::cmp::min(config.parallel, data_ports.len());
     let mut worker_assignments: Vec<Vec<usize>> = vec![Vec::new(); num_workers];
+
     for i in 0..num_chunks {
         let worker_idx = i % num_workers;
         worker_assignments[worker_idx].push(i);
@@ -349,6 +362,7 @@ fn setup_workers(
 
     // Signal handling
     let shutdown_flag_clone = shutdown_flag.clone();
+
     ctrlc::set_handler(move || {
         shutdown_flag_clone.store(true, Ordering::SeqCst);
     })
@@ -391,7 +405,6 @@ async fn run_workers(
     shutdown_flag: Arc<AtomicBool>,
 ) -> Vec<usize> {
     let mut all_failed = Vec::new();
-
     let chunk_lists: Vec<Vec<usize>> = worker_assignments.into_iter().collect();
     let mut handles = Vec::new();
 
@@ -399,6 +412,7 @@ async fn run_workers(
         if chunk_list.is_empty() {
             continue;
         }
+
         let port_idx = w_idx % data_ports.len();
         let port = data_ports[port_idx];
 
@@ -415,6 +429,7 @@ async fn run_workers(
         };
 
         let handle = tokio::spawn(async move { worker(worker_config).await });
+
         handles.push(handle);
     }
 
@@ -427,6 +442,7 @@ async fn run_workers(
     // Finish progress bar (abandon if any chunk failed, so it doesn't lie at 100%)
     {
         let pb = progress_bar.lock().unwrap();
+
         if all_failed.is_empty() {
             pb.finish();
         } else {

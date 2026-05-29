@@ -11,7 +11,10 @@
 //! - [`verify_and_write_chunk()`]: Verify BLAKE3 hash and write chunk to file
 //! - [`send_ack()`]: Send acknowledgment back to client
 
-use std::sync::{Arc, Mutex};
+use std::{
+    fs,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::Result;
 use log::{debug, error};
@@ -58,9 +61,7 @@ use super::super::{file_receiver::FileReceiver, get_receiver};
 pub async fn handle_data_connection(mut stream: TcpStream, local_port: u16) -> Result<()> {
     debug!("Data connection on port {}", local_port);
 
-    let receiver = get_receiver(local_port);
-
-    let receiver = match receiver {
+    let receiver = match get_receiver(local_port) {
         Some(r) => r,
         None => {
             error!("No receiver for port {}", local_port);
@@ -134,12 +135,15 @@ async fn handle_query(receiver: &Arc<Mutex<FileReceiver>>, stream: &mut TcpStrea
         .collect();
 
     let mut resp = Vec::with_capacity(4 + received.len() * 4);
+
     resp.extend_from_slice(&(received.len() as u32).to_be_bytes());
+
     for idx in received {
         resp.extend_from_slice(&(idx as u32).to_be_bytes());
     }
 
     frame::send_timeout(stream, &resp).await?;
+
     Ok(())
 }
 
@@ -178,6 +182,7 @@ async fn process_chunk(
 
     // Validate total chunk message length (header + data + hash)
     let expected_len = chunk::HEADER_SIZE + chunk_size + chunk::HASH_SIZE;
+
     if data.len() < expected_len {
         error!(
             "Chunk message too short: {} bytes (expected at least {})",
@@ -190,6 +195,7 @@ async fn process_chunk(
     // Validate chunk index against receiver's expected range
     let (expected_chunk_size, is_last) = {
         let recv = receiver.lock().unwrap();
+
         if chunk_index >= recv.num_chunks {
             error!(
                 "Chunk index {} out of range (num_chunks={})",
@@ -197,6 +203,7 @@ async fn process_chunk(
             );
             return Ok(());
         }
+
         let last_idx = recv.num_chunks.saturating_sub(1);
         let is_last = chunk_index == last_idx;
         let expected = if is_last {
@@ -210,6 +217,7 @@ async fn process_chunk(
         } else {
             recv.chunk_size
         };
+
         (expected, is_last)
     };
 
@@ -221,6 +229,7 @@ async fn process_chunk(
             expected_chunk_size,
             if is_last { " (last chunk)" } else { "" }
         );
+
         return Ok(());
     }
 
@@ -264,7 +273,7 @@ fn verify_and_write_chunk(
 
     if chunk_hash_calc == *chunk_hash_rcvd {
         let part_path = receiver.lock().unwrap().part_path(chunk_index);
-        if let Err(e) = std::fs::write(&part_path, chunk_data) {
+        if let Err(e) = fs::write(&part_path, chunk_data) {
             error!("Failed to write chunk {}: {}", chunk_index, e);
             receiver.lock().unwrap().failed = true;
             return Ok(chunk::ACK_HASH_MISMATCH);
