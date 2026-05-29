@@ -42,12 +42,13 @@ bee-sync server [OPTIONS]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--address` | `0.0.0.0:19999` | Bind address (host:port) |
-| `--output` | `./received/` | Directory to save received files |
-| `--cert` | — | TLS certificate (PEM) |
-| `--key` | — | TLS private key (PEM) |
-| `--max-parallel` | `100` | Maximum parallel data connections per transfer |
-| `--verbose` | — | Enable debug logging |
+| `-a`, `--address` | `0.0.0.0:19999` | Bind address (host:port) |
+| `-o`, `--output-dir` | `./received/` | Directory for final assembled files |
+| `-t`, `--temp-dir` | *(same as output)* | Directory for in-progress `.part` files |
+| `-c`, `--cert` | — | TLS certificate (PEM) |
+| `-k`, `--key` | — | TLS private key (PEM) |
+| `-m`, `--max-parallel` | `100` | Maximum parallel data connections per transfer |
+| `-v`, `--verbose` | — | Enable debug logging |
 
 ### Client
 
@@ -57,15 +58,15 @@ bee-sync client --file PATH [OPTIONS]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--file` | *(required)* | File to send |
-| `--address` | `localhost:19999` | Server address (host:port) |
-| `--chunk-size` | `5M` | Chunk size (e.g. `1M`, `10M`, `1G`) |
-| `--chunk-count` | — | Split into N chunks instead of using `--chunk-size` |
-| `--parallel` | `10` | Max parallel data connections |
-| `--retries` | `3` | Retries per chunk on hash mismatch |
+| `-f`, `--file` | *(required)* | File to send |
+| `-a`, `--address` | `localhost:19999` | Server address (host:port) |
+| `-s`, `--chunk-size` | `5M` | Chunk size (e.g. `1M`, `10M`, `1G`) |
+| `-n`, `--chunk-count` | — | Split into N chunks |
+| `-p`, `--parallel` | `10` | Max parallel data connections |
+| `-r`, `--retries` | `3` | Retries per chunk |
 | `--tls` | — | Enable TLS |
-| `--tls-no-verify` | — | Skip certificate verification (self-signed certs) |
-| `--verbose` | — | Enable debug logging |
+| `--tls-no-verify` | — | Skip certificate verification |
+| `-v`, `--verbose` | — | Enable debug logging |
 
 ### Examples
 

@@ -2,8 +2,6 @@
 
 use clap::{Parser, Subcommand};
 
-use crate::{client, server};
-
 /// bee-sync - File transfer tool with parallel chunked transfer
 #[derive(Parser)]
 #[command(name = "bee-sync")]
@@ -34,54 +32,58 @@ impl Commands {
 #[derive(Parser)]
 pub struct ServerArgs {
     /// Bind address (host:port)
-    #[arg(long, default_value = "0.0.0.0:19999")]
+    #[arg(short = 'a', long, default_value = "0.0.0.0:19999")]
     pub address: String,
 
-    /// Output directory
-    #[arg(long, default_value = "./received/")]
-    pub output: String,
+    /// Output directory for final assembled files
+    #[arg(short = 'o', long = "output-dir", default_value = "./received/")]
+    pub output_dir: String,
+
+    /// Temporary directory for in-progress .part files (default: same as --output-dir)
+    #[arg(short = 't', long = "temp-dir")]
+    pub temp_dir: Option<String>,
 
     /// TLS certificate file (PEM)
-    #[arg(long)]
+    #[arg(short = 'c', long)]
     pub cert: Option<String>,
 
     /// TLS private key file (PEM)
-    #[arg(long)]
+    #[arg(short = 'k', long)]
     pub key: Option<String>,
 
-    /// Max parallel connections
-    #[arg(long, default_value_t = server::MAX_PARALLEL)]
+    /// Max parallel connections per transfer
+    #[arg(short = 'm', long = "max-parallel", default_value_t = crate::server::MAX_PARALLEL)]
     pub max_parallel: usize,
 
     /// Enable verbose/debug logging
-    #[arg(long)]
+    #[arg(short = 'v', long)]
     pub verbose: bool,
 }
 
 #[derive(Parser)]
 pub struct ClientArgs {
     /// Server address (host:port)
-    #[arg(long, default_value = "localhost:19999")]
+    #[arg(short = 'a', long, default_value = "localhost:19999")]
     pub address: String,
 
-    /// File to send (required)
-    #[arg(long)]
+    /// File to send
+    #[arg(short = 'f', long)]
     pub file: Option<String>,
 
-    /// Chunk size (e.g., 1M, 10M, 1G, 1k; default: 5M)
-    #[arg(long, default_value = client::DEFAULT_CHUNK_SIZE)]
+    /// Chunk size (e.g., 1M, 10M, 1G; default: 5M)
+    #[arg(short = 's', long = "chunk-size", default_value = crate::client::DEFAULT_CHUNK_SIZE)]
     pub chunk_size: String,
 
     /// Split file into N chunks instead of using --chunk-size
-    #[arg(long)]
+    #[arg(short = 'n', long = "chunk-count")]
     pub chunk_count: Option<usize>,
 
-    /// Max parallel connections
-    #[arg(long, default_value_t = client::DEFAULT_PARALLEL)]
+    /// Max parallel data connections
+    #[arg(short = 'p', long, default_value_t = crate::client::DEFAULT_PARALLEL)]
     pub parallel: usize,
 
     /// Retries per chunk
-    #[arg(long, default_value_t = client::DEFAULT_RETRIES)]
+    #[arg(short = 'r', long, default_value_t = crate::client::DEFAULT_RETRIES)]
     pub retries: usize,
 
     /// Enable TLS encryption
@@ -89,10 +91,10 @@ pub struct ClientArgs {
     pub tls: bool,
 
     /// Disable TLS certificate verification
-    #[arg(long)]
+    #[arg(long = "tls-no-verify")]
     pub tls_no_verify: bool,
 
     /// Enable verbose/debug logging
-    #[arg(long)]
+    #[arg(short = 'v', long)]
     pub verbose: bool,
 }

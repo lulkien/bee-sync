@@ -62,13 +62,17 @@ async fn run_server(args: cli::ServerArgs) -> i32 {
         }
     };
 
+    let temp_dir = args.temp_dir.unwrap_or_else(|| args.output_dir.clone());
+
     log::info!("Starting bee-sync server on {}:{}", bind_host, port);
-    log::info!("Output directory: {}", args.output);
+    log::info!("Output directory: {}", args.output_dir);
+    log::info!("Temp directory: {}", temp_dir);
 
     let config = ServerConfig {
         bind_host,
         port,
-        output_dir: args.output,
+        output_dir: args.output_dir,
+        temp_dir,
         certfile: args.cert,
         keyfile: args.key,
         max_parallel: args.max_parallel,
@@ -119,30 +123,27 @@ async fn run_client(args: cli::ClientArgs) -> i32 {
             log::error!("Chunk count must be > 0");
             return 1;
         }
-        let cs = (file_size as usize).div_ceil(count);
-        log::info!("Starting bee-sync client");
-        log::info!("Server: {}:{}", host, port);
-        log::info!(
-            "File: {} ({} bytes, {} chunks of ~{} bytes each)",
-            filepath,
-            file_size,
-            count,
-            cs
-        );
-        cs
+        (file_size as usize).div_ceil(count)
     } else {
-        let cs = match utils::parse_chunk_size(&args.chunk_size) {
+        match utils::parse_chunk_size(&args.chunk_size) {
             Ok(s) => s,
             Err(e) => {
                 log::error!("Invalid chunk size: {}", e);
                 return 1;
             }
-        };
-        log::info!("Starting bee-sync client");
-        log::info!("Server: {}:{}", host, port);
-        log::info!("File: {} (chunk size: {})", filepath, cs);
-        cs
+        }
     };
+
+    let num_chunks = (file_size as usize).div_ceil(chunk_size);
+    log::info!("Starting bee-sync client");
+    log::info!("Server: {}:{}", host, port);
+    log::info!(
+        "File: {} ({} bytes, {} chunks of {} bytes each)",
+        filepath,
+        file_size,
+        num_chunks,
+        chunk_size,
+    );
 
     let config = ClientConfig {
         host,

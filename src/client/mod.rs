@@ -24,7 +24,7 @@ use crate::{
 mod tls;
 mod worker;
 
-use tls::{connect_to_server, Stream};
+use tls::{Stream, connect_to_server};
 use worker::{WorkerConfig, worker};
 
 /// Default chunk size: 5 MiB
@@ -95,7 +95,10 @@ pub async fn run_client(config: ClientConfig) -> i32 {
     }
 
     // Wait for server to confirm assembly
-    log::info!("All {} chunks sent, waiting for server confirmation...", num_chunks);
+    log::info!(
+        "All {} chunks sent, waiting for server confirmation...",
+        num_chunks
+    );
     match recv_final_status(&mut control_sock).await {
         Ok(true) => {
             log::info!("Server confirmed transfer complete");
@@ -217,13 +220,6 @@ fn setup_transfer(config: &ClientConfig) -> (u64, usize) {
     } else {
         1
     };
-
-    log::info!(
-        "File: {} ({} bytes, {} chunks)",
-        config.filepath,
-        file_size,
-        num_chunks
-    );
 
     (file_size, num_chunks)
 }

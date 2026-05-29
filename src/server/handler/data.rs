@@ -19,7 +19,7 @@ use tokio::net::TcpStream;
 
 use crate::{
     file_ops,
-    protocol::{frame, chunk},
+    protocol::{chunk, frame},
 };
 
 use super::super::{file_receiver::FileReceiver, get_receiver};
@@ -201,9 +201,12 @@ async fn process_chunk(
         let is_last = chunk_index == last_idx;
         let expected = if is_last {
             // Last chunk may be smaller than recv.chunk_size
-            let remainder =
-                recv.file_size as usize - (last_idx * recv.chunk_size);
-            if remainder == 0 { recv.chunk_size } else { remainder }
+            let remainder = recv.file_size as usize - (last_idx * recv.chunk_size);
+            if remainder == 0 {
+                recv.chunk_size
+            } else {
+                remainder
+            }
         } else {
             recv.chunk_size
         };

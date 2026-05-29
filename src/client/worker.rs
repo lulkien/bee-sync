@@ -16,7 +16,7 @@ use tokio::net::TcpStream;
 
 use crate::{
     file_ops::calc_hash,
-    protocol::{frame, chunk},
+    protocol::{chunk, frame},
 };
 
 /// Worker configuration
@@ -60,16 +60,26 @@ pub async fn send_chunk(
 
     for attempt in 0..retries {
         // Each retry gets more time (1x, 2x, 3x the base timeout)
-        let timeout = frame::timeout_for_bytes(total_bytes)
-            .saturating_mul((attempt + 1) as u32);
+        let timeout = frame::timeout_for_bytes(total_bytes).saturating_mul((attempt + 1) as u32);
 
-        tokio::time::timeout(timeout, frame::send_parts(stream, &[&header, &chunk_data, &chunk_hash]))
-            .await
-            .map_err(|_| anyhow::anyhow!("send chunk {} timed out after {:?}", chunk_index, timeout))??;
+        tokio::time::timeout(
+            timeout,
+            frame::send_parts(stream, &[&header, &chunk_data, &chunk_hash]),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!("send chunk {} timed out after {:?}", chunk_index, timeout)
+        })??;
 
         let ack = tokio::time::timeout(timeout, frame::recv(stream))
             .await
-            .map_err(|_| anyhow::anyhow!("ack recv for chunk {} timed out after {:?}", chunk_index, timeout))??;
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "ack recv for chunk {} timed out after {:?}",
+                    chunk_index,
+                    timeout
+                )
+            })??;
         if ack.is_empty() {
             if attempt < retries - 1 {
                 tokio::time::sleep(Duration::from_millis(200 * (attempt + 1) as u64)).await;
@@ -161,7 +171,16 @@ pub async fn worker(config: WorkerConfig) -> (Vec<usize>, Vec<usize>) {
                 let remaining = (config.file_size - offset) as usize;
                 let actual_size = std::cmp::min(config.chunk_size, remaining);
 
-                match send_chunk(&mut stream, &config.filepath, idx, offset, actual_size, config.retries).await {
+                match send_chunk(
+                    &mut stream,
+                    &config.filepath,
+                    idx,
+                    offset,
+                    actual_size,
+                    config.retries,
+                )
+                .await
+                {
                     Ok(true) => {
                         ok_list.push(idx);
                         // Update progress

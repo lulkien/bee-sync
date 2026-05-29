@@ -3,7 +3,10 @@
 //! This module contains the logic for handling control connections from clients,
 //! including handshake parsing, receiver setup, and transfer orchestration.
 
-use std::{fs, sync::{Arc, Mutex}};
+use std::{
+    fs,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::Result;
 use log::{debug, error, info};
@@ -52,6 +55,7 @@ pub struct HandshakeData {
 pub async fn handle_control_connection(
     mut stream: impl AsyncRead + AsyncWrite + Unpin,
     output_dir: &str,
+    temp_dir: &str,
     max_parallel: usize,
 ) -> Result<()> {
     // Receive handshake frame
@@ -90,11 +94,18 @@ pub async fn handle_control_connection(
         return Ok(());
     }
 
-    // Ensure output directory exists and is writable before accepting the transfer
-    if let Err(e) = fs::create_dir_all(output_dir) {
+    // Ensure output and temp directories exist before accepting the transfer
+    if let Err(e) = std::fs::create_dir_all(output_dir) {
         error!("Output directory unavailable: {}", e);
         send_handshake_response(&mut stream, handshake::RESP_ERR, &[]).await?;
         return Ok(());
+    }
+    if temp_dir != output_dir {
+        if let Err(e) = std::fs::create_dir_all(temp_dir) {
+            error!("Temp directory unavailable: {}", e);
+            send_handshake_response(&mut stream, handshake::RESP_ERR, &[]).await?;
+            return Ok(());
+        }
     }
 
     // Allocate data ports for parallel transfer
@@ -117,6 +128,7 @@ pub async fn handle_control_connection(
         handshake.num_chunks,
         handshake.full_hash,
         output_dir.to_string(),
+        temp_dir.to_string(),
     );
 
     register_receivers(&data_socks, receiver.clone());
@@ -388,7 +400,7 @@ pub fn check_existing_file(
 /// - `chunk_size`: Size of each chunk
 /// - `num_chunks`: Number of chunks
 /// - `full_hash`: Expected BLAKE3 hash of complete file
-/// - `output_dir`: Output directory
+/// - `parts_dir`: Directory for .part files (may differ from output_dir)
 ///
 /// # Returns
 /// - `Arc<Mutex<FileReceiver>>`: Initialized receiver
@@ -399,9 +411,10 @@ pub fn create_receiver(
     num_chunks: usize,
     full_hash: [u8; 32],
     output_dir: String,
+    parts_dir: String,
 ) -> Arc<Mutex<FileReceiver>> {
     Arc::new(Mutex::new(FileReceiver::new(
-        safe_name, file_size, chunk_size, num_chunks, full_hash, output_dir,
+        safe_name, file_size, chunk_size, num_chunks, full_hash, output_dir, parts_dir,
     )))
 }
 

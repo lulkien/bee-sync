@@ -93,7 +93,7 @@ pub async fn connect_to_server(
         let dns_name = ServerName::try_from(host.clone())?;
         let stream = TcpStream::connect((host.as_str(), port)).await?;
         let tls_stream = connector.connect(dns_name, stream).await?;
-        
+
         Ok(Box::new(tls_stream))
     } else {
         let stream = TcpStream::connect((host.as_str(), port))

@@ -55,6 +55,7 @@ pub struct ServerConfig {
     pub bind_host: String,
     pub port: u16,
     pub output_dir: String,
+    pub temp_dir: String,
     pub certfile: Option<String>,
     pub keyfile: Option<String>,
     pub max_parallel: usize,
@@ -160,9 +161,11 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
 
     let bind_addr = (config.bind_host.as_str(), config.port);
     let control_listener = TcpListener::bind(bind_addr).await?;
+
     info!("Listening on {}:{}", config.bind_host, config.port);
 
     let output_dir = config.output_dir.clone();
+    let temp_dir = config.temp_dir.clone();
     let max_parallel = config.max_parallel;
     let conn_semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
 
@@ -171,6 +174,7 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
             Ok((stream, addr)) => {
                 let _tls_ctx = tls_ctx.clone();
                 let output_dir = output_dir.clone();
+                let temp_dir = temp_dir.clone();
                 let permit = match conn_semaphore.clone().try_acquire_owned() {
                     Ok(p) => p,
                     Err(_) => {
@@ -186,28 +190,30 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
                         match acceptor.accept(stream).await {
                             Ok(tls_stream) => {
                                 handler::handle_control_connection(
-                                    tls_stream, &output_dir, max_parallel,
+                                    tls_stream,
+                                    &output_dir,
+                                    &temp_dir,
+                                    max_parallel,
                                 )
                                 .await
                             }
                             Err(e) => {
-                                error!(
-                                    "TLS handshake failed from {}: {}",
-                                    addr, e
-                                );
+                                error!("TLS handshake failed from {}: {}", addr, e);
                                 return;
                             }
                         }
                     } else {
-                        handler::handle_control_connection(stream, &output_dir, max_parallel)
-                            .await
+                        handler::handle_control_connection(
+                            stream,
+                            &output_dir,
+                            &temp_dir,
+                            max_parallel,
+                        )
+                        .await
                     };
 
                     if let Err(e) = result {
-                        error!(
-                            "Error handling control connection from {}: {}",
-                            addr, e
-                        );
+                        error!("Error handling control connection from {}: {}", addr, e);
                     }
                 });
             }

@@ -15,6 +15,8 @@ pub struct FileReceiver {
     pub num_chunks: usize,
     pub full_hash: [u8; 32],
     pub output_dir: String,
+    /// Where .part files are stored during transfer (defaults to output_dir)
+    pub parts_dir: String,
     pub received_chunks: Vec<bool>,
     /// Set to true when a disk write fails — signals the control handler to abort
     pub failed: bool,
@@ -29,6 +31,7 @@ impl FileReceiver {
         num_chunks: usize,
         full_hash: [u8; 32],
         output_dir: String,
+        parts_dir: String,
     ) -> Self {
         let received_chunks = vec![false; num_chunks];
         FileReceiver {
@@ -38,13 +41,14 @@ impl FileReceiver {
             num_chunks,
             full_hash,
             output_dir,
+            parts_dir,
             received_chunks,
             failed: false,
         }
     }
 
     pub fn part_path(&self, index: usize) -> String {
-        format!("{}/{}.part{}", self.output_dir, self.filename, index)
+        format!("{}/{}.part{}", self.parts_dir, self.filename, index)
     }
 
     pub fn final_path(&self) -> String {
@@ -60,7 +64,7 @@ impl FileReceiver {
 
         let final_path = Path::new(&self.output_dir).join(&self.filename);
         let part_path =
-            |i: usize| Path::new(&self.output_dir).join(format!("{}.part{}", self.filename, i));
+            |i: usize| Path::new(&self.parts_dir).join(format!("{}.part{}", self.filename, i));
 
         let mut hasher = blake3::Hasher::new();
         let mut out = std::fs::File::create(&final_path)?;
