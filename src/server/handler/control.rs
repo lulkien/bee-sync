@@ -6,7 +6,8 @@
 use std::{
     fs,
     path::Path,
-    sync::{Arc, Mutex}, time::Duration,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use anyhow::{Result, anyhow, bail};

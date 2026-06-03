@@ -1,6 +1,10 @@
 //! Utility functions for bee-sync.
 
+use std::io::IsTerminal;
+use std::path::Path;
+
 use anyhow::{Result, anyhow};
+use tokio::io::AsyncWriteExt;
 
 /// Parse an address string in "host:port" format.
 /// Returns (host, port) on success.
@@ -47,4 +51,75 @@ pub fn parse_chunk_size(value: &str) -> Result<usize> {
             .parse()
             .map_err(|_| anyhow!("Invalid chunk size: {}", value))
     }
+}
+
+/// Download a file from a URL to a temp directory with progress bar.
+///
+/// Creates the temp directory if it doesn't exist. Extracts filename from URL
+/// path component. Returns the full path to the downloaded file.
+pub async fn download_file(url: &str, temp_dir: &str, verbose: bool) -> Result<String> {
+    let dir = Path::new(temp_dir);
+    tokio::fs::create_dir_all(dir).await?;
+
+    // Extract filename from URL path, default to "download" if none
+    let url_path = url
+        .split('?') // strip query params
+        .next()
+        .unwrap_or("");
+    let filename = url_path
+        .split('/')
+        .rfind(|s| !s.is_empty())
+        .unwrap_or("download");
+    let dest = dir.join(filename);
+
+    let host = url.split('/').nth(2).unwrap_or("?");
+    log::info!("Downloading from {host} -> {}", dest.display());
+
+    let response = reqwest::get(url).await?;
+    let total = response.content_length().unwrap_or(0);
+
+    let mut file = tokio::fs::File::create(&dest).await?;
+    let mut stream = response.bytes_stream();
+
+    if verbose || !std::io::stderr().is_terminal() {
+        // Non-TTY: periodic log messages
+        use futures_util::StreamExt;
+        let mut downloaded: u64 = 0;
+        let mut last_log = std::time::Instant::now();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            file.write_all(&chunk).await?;
+            downloaded += chunk.len() as u64;
+            if last_log.elapsed() >= std::time::Duration::from_secs(3) {
+                let pct = if total > 0 {
+                    downloaded as f64 / total as f64 * 100.0
+                } else {
+                    0.0
+                };
+                log::info!("Download progress: {:.1}% ({}/{})", pct, downloaded, total);
+                last_log = std::time::Instant::now();
+            }
+        }
+        log::info!("Downloaded {} bytes ({})", total, filename);
+    } else {
+        // TTY: indicatif progress bar
+        let pb = indicatif::ProgressBar::new(total);
+        pb.set_style(
+            indicatif::ProgressStyle::default_bar()
+                .template(
+                    "[{bar:40}] {percent:>3}% {bytes:>10}/{total_bytes} {bytes_per_sec} eta {eta}",
+                )
+                .unwrap(),
+        );
+        use futures_util::StreamExt;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            file.write_all(&chunk).await?;
+            pb.inc(chunk.len() as u64);
+        }
+        pb.finish();
+        pb.tick();
+        log::info!("Downloaded {} bytes ({})", total, filename);
+    }
+    Ok(dest.to_string_lossy().to_string())
 }

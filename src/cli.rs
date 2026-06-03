@@ -66,9 +66,22 @@ pub struct ClientArgs {
     #[arg(short = 'a', long, default_value = "localhost:19999")]
     pub address: String,
 
-    /// File to send
+    /// File to send (mutually exclusive with --url)
     #[arg(short = 'f', long)]
     pub file: Option<String>,
+
+    /// URL to download from (mutually exclusive with --file)
+    #[arg(short = 'u', long, conflicts_with = "file")]
+    pub url: Option<String>,
+
+    /// Temp directory for downloaded files (only with --url)
+    #[arg(
+        short = 't',
+        long = "temp-dir",
+        requires = "url",
+        default_value = "/tmp"
+    )]
+    pub temp_dir: String,
 
     /// Chunk size (e.g., 1M, 10M, 1G; default: 5M)
     #[arg(short = 's', long = "chunk-size", default_value = crate::client::DEFAULT_CHUNK_SIZE)]

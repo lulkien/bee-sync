@@ -258,7 +258,6 @@ async fn perform_handshake(config: &ClientConfig) -> Result<(Box<dyn Stream>, u8
         config.tls_no_verify,
     )
     .await
-
     {
         Ok(s) => s,
         Err(e) => {

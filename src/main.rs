@@ -25,6 +25,10 @@ use crate::{
 
 #[tokio::main]
 async fn main() {
+    // Install default CryptoProvider before any TLS operations.
+    // Required when both ring and aws-lc-rs features are compiled in.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let cli = Cli::parse();
 
     init_logging(cli.command.verbose());
@@ -91,10 +95,22 @@ async fn run_server(args: cli::ServerArgs) -> i32 {
 }
 
 async fn run_client(args: cli::ClientArgs) -> i32 {
-    let filepath = match args.file {
-        Some(f) => f,
-        None => {
-            eprintln!("Error: --file is required");
+    let filepath = match (args.file, args.url) {
+        (Some(f), None) => f,
+        (None, Some(url)) => match utils::download_file(&url, &args.temp_dir, args.verbose).await {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Failed to download from URL: {}", e);
+                return 1;
+            }
+        },
+        (None, None) => {
+            eprintln!("Error: --file or --url is required");
+            return 1;
+        }
+        (Some(_), Some(_)) => {
+            // clap enforces mutual exclusion, but be defensive
+            eprintln!("Error: --file and --url are mutually exclusive");
             return 1;
         }
     };
