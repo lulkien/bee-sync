@@ -103,8 +103,8 @@ pub struct ClientArgs {
     #[arg(long)]
     pub tls: bool,
 
-    /// Disable TLS certificate verification
-    #[arg(long = "tls-no-verify")]
+    /// Disable TLS certificate verification (requires --tls)
+    #[arg(long = "tls-no-verify", requires = "tls")]
     pub tls_no_verify: bool,
 
     /// Enable verbose/debug logging

@@ -29,11 +29,11 @@ mod worker;
 use tls::{Stream, connect_to_server};
 use worker::{WorkerConfig, worker};
 
-/// Default chunk size: 5 MiB
-pub const DEFAULT_CHUNK_SIZE: &str = "5M";
+/// Default chunk size: 2 MiB
+pub const DEFAULT_CHUNK_SIZE: &str = "2M";
 
 /// Default parallel connections
-pub const DEFAULT_PARALLEL: usize = 10;
+pub const DEFAULT_PARALLEL: usize = 25;
 
 /// Default retries per chunk
 pub const DEFAULT_RETRIES: usize = 3;
