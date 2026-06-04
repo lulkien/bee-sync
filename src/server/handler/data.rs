@@ -64,7 +64,7 @@ pub async fn handle_data_connection(mut stream: TcpStream, local_port: u16) -> R
     let receiver = match get_receiver(local_port) {
         Some(r) => r,
         None => {
-            error!("No receiver for port {}", local_port);
+            debug!("No receiver for port {} (transfer already completed)", local_port);
             return Ok(());
         }
     };

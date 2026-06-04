@@ -31,6 +31,7 @@ use std::{
 };
 
 use log::{error, info};
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 use tokio_rustls::TlsAcceptor;
@@ -169,8 +170,9 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = shutdown.clone();
     ctrlc::set_handler(move || {
-        info!("Shutting down server...");
-        shutdown_clone.store(true, Ordering::SeqCst);
+        if !shutdown_clone.swap(true, Ordering::SeqCst) {
+            info!("Shutting down server...");
+        }
     })
     .ok();
 
@@ -180,12 +182,15 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
     let conn_semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
 
     loop {
-        if shutdown.load(Ordering::SeqCst) {
-            info!("Server shutting down");
-            break Ok(());
-        }
-        match control_listener.accept().await {
-            Ok((stream, addr)) => {
+        tokio::select! {
+            result = control_listener.accept() => {
+                let (stream, addr) = match result {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!("Error accepting connection: {}", e);
+                        continue;
+                    }
+                };
                 info!("Client connected: {}", addr);
                 let addr_str = addr.to_string();
                 let _tls_ctx = tls_ctx.clone();
@@ -235,8 +240,11 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
                     }
                 });
             }
-            Err(e) => {
-                error!("Error accepting connection: {}", e);
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                if shutdown.load(Ordering::SeqCst) {
+                    info!("Server shutting down");
+                    break Ok(());
+                }
             }
         }
     }
