@@ -141,7 +141,8 @@ async fn run_client(args: cli::ClientArgs) -> i32 {
         }
         (file_size as usize).div_ceil(count)
     } else {
-        match utils::parse_chunk_size(&args.chunk_size) {
+        let size_str = args.chunk_size.as_deref().unwrap_or(crate::client::DEFAULT_CHUNK_SIZE);
+        match utils::parse_chunk_size(size_str) {
             Ok(s) => s,
             Err(e) => {
                 error!("Invalid chunk size: {}", e);

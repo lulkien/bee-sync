@@ -83,12 +83,12 @@ pub struct ClientArgs {
     )]
     pub temp_dir: String,
 
-    /// Chunk size (e.g., 1M, 10M, 1G; default: 5M)
-    #[arg(short = 's', long = "chunk-size", default_value = crate::client::DEFAULT_CHUNK_SIZE)]
-    pub chunk_size: String,
+    /// Chunk size (e.g., 1M, 10M, 1G; default: 2M)
+    #[arg(short = 's', long = "chunk-size", conflicts_with = "chunk_count")]
+    pub chunk_size: Option<String>,
 
     /// Split file into N chunks instead of using --chunk-size
-    #[arg(short = 'n', long = "chunk-count")]
+    #[arg(short = 'n', long = "chunk-count", conflicts_with = "chunk_size")]
     pub chunk_count: Option<usize>,
 
     /// Max parallel data connections
