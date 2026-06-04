@@ -24,7 +24,10 @@
 use std::{
     collections::HashMap,
     fs,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{
+        Arc, LazyLock, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use log::{error, info};
@@ -162,12 +165,25 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
 
     info!("Listening on {}:{}", config.bind_host, config.port);
 
+    // Graceful shutdown on Ctrl+C
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_clone = shutdown.clone();
+    ctrlc::set_handler(move || {
+        info!("Shutting down server...");
+        shutdown_clone.store(true, Ordering::SeqCst);
+    })
+    .ok();
+
     let output_dir = config.output_dir.clone();
     let temp_dir = config.temp_dir.clone();
     let max_parallel = config.max_parallel;
     let conn_semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
 
     loop {
+        if shutdown.load(Ordering::SeqCst) {
+            info!("Server shutting down");
+            break Ok(());
+        }
         match control_listener.accept().await {
             Ok((stream, addr)) => {
                 info!("Client connected: {}", addr);

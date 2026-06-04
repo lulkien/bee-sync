@@ -161,7 +161,10 @@ impl TransferMetadata {
         let data = self.to_bytes();
 
         fs::write(&tmp, &data)?;
-        fs::rename(&tmp, &path)?;
+        if let Err(e) = fs::rename(&tmp, &path) {
+            let _ = fs::remove_file(&tmp);
+            return Err(e.into());
+        }
 
         Ok(())
     }
