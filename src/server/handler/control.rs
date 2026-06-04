@@ -56,6 +56,7 @@ pub struct HandshakeData {
 /// - `Err(e)`: Error during handshake or transfer
 pub async fn handle_control_connection(
     mut stream: impl AsyncRead + AsyncWrite + Unpin,
+    client_addr: &str,
     output_dir: &str,
     temp_dir: &str,
     max_parallel: usize,
@@ -84,9 +85,9 @@ pub async fn handle_control_connection(
         }
     };
 
-    debug!(
-        "Handshake: {} ({} bytes, {} chunks of {} bytes)",
-        handshake.safe_name, handshake.file_size, handshake.num_chunks, handshake.chunk_size
+    info!(
+        "[{}] Handshake: {} ({} bytes, {} chunks of {} bytes)",
+        client_addr, handshake.safe_name, handshake.file_size, handshake.num_chunks, handshake.chunk_size
     );
 
     // Check if file already exists and matches
@@ -138,19 +139,35 @@ pub async fn handle_control_connection(
     // Send handshake response with data ports
     send_handshake_response(&mut stream, handshake::RESP_OK, &ports).await?;
 
-    // Scan existing .part files for resume
-    scan_existing_parts(&mut receiver.lock().unwrap(), handshake.num_chunks);
+    // Load metadata from previous transfer and validate existing .part files
+    {
+        let mut recv = receiver.lock().unwrap();
+        if let Some(meta) = recv.load_or_purge_metadata() {
+            for &idx in meta.chunk_hashes.keys() {
+                recv.received_chunks[idx] = true;
+            }
+            recv.metadata = meta;
+            let count = recv.received_chunks.iter().filter(|&&c| c).count();
+            if count > 0 {
+                info!("Resuming transfer: {}/{} chunks already valid", count, recv.num_chunks);
+            }
+        }
+    }
 
     // Spawn data server tasks
     let data_tasks = spawn_data_servers(data_socks, receiver.clone()).await;
 
-    // Wait for all chunks
-    wait_for_completion(&receiver).await;
+    // Wait for all chunks (or client disconnect)
+    wait_for_completion(&receiver, &mut stream).await;
 
-    // Determine outcome: skip assembly if the transfer already failed
+    // Determine outcome: skip assembly if the transfer already failed or client disconnected
+    let completed = receiver.lock().unwrap().is_complete();
     let failed = receiver.lock().unwrap().failed;
     let success = if failed {
         error!("Transfer aborted due to I/O failure");
+        false
+    } else if !completed {
+        info!("Client disconnected, skipping assembly");
         false
     } else {
         match assemble_file(&receiver) {
@@ -185,9 +202,15 @@ pub async fn handle_control_connection(
     cleanup(&ports, data_tasks);
 
     if success {
-        info!("File {} received successfully", handshake.filename);
+        info!(
+            "[{}] Transfer complete: {} ({} bytes, {} chunks)",
+            client_addr, handshake.filename, handshake.file_size, handshake.num_chunks
+        );
     } else {
-        error!("File {} transfer failed", handshake.filename);
+        error!(
+            "[{}] Transfer failed: {} ({} bytes, {} chunks)",
+            client_addr, handshake.filename, handshake.file_size, handshake.num_chunks
+        );
     }
 
     Ok(())
@@ -426,23 +449,6 @@ pub fn create_receiver(
     )))
 }
 
-/// Scan existing .part files for resume support
-///
-/// Updates receiver's received_chunks map based on existing .part files.
-///
-/// # Arguments
-/// - `receiver`: FileReceiver to update
-/// - `num_chunks`: Total number of chunks expected
-pub fn scan_existing_parts(receiver: &mut FileReceiver, num_chunks: usize) {
-    for i in 0..num_chunks {
-        let part_path = receiver.part_path(i);
-
-        if fs::exists(&part_path).unwrap_or(false) {
-            receiver.received_chunks[i] = true;
-        }
-    }
-}
-
 /// Spawn data server tasks for each allocated port
 ///
 /// # Arguments
@@ -482,13 +488,20 @@ pub async fn spawn_data_servers(
     data_tasks
 }
 
-/// Wait for all chunks to be received
+/// Wait for all chunks to be received, or client disconnect.
 ///
-/// Polls receiver's is_complete() method every 500ms.
+/// Races `is_complete()` polling against the control stream. If the stream
+/// yields EOF or an error, the client has disconnected and we stop waiting.
 ///
 /// # Arguments
 /// - `receiver`: FileReceiver to monitor
-pub async fn wait_for_completion(receiver: &Arc<Mutex<FileReceiver>>) {
+/// - `stream`: Control connection (monitored for disconnect)
+pub async fn wait_for_completion(
+    receiver: &Arc<Mutex<FileReceiver>>,
+    stream: &mut (impl AsyncRead + Unpin),
+) {
+    use tokio::io::AsyncReadExt;
+
     loop {
         let should_break = {
             let recv = receiver.lock().unwrap();
@@ -499,7 +512,23 @@ pub async fn wait_for_completion(receiver: &Arc<Mutex<FileReceiver>>) {
             break;
         }
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        // Race: chunks complete, or client disconnects
+        let mut buf = [0u8; 1];
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {},
+            result = stream.read(&mut buf) => {
+                match result {
+                    Ok(0) | Err(_) => {
+                        info!("Client disconnected during transfer");
+                        break;
+                    }
+                    Ok(_) => {
+                        // Unexpected data on control channel — ignore
+                        continue;
+                    }
+                }
+            }
+        }
     }
 }
 

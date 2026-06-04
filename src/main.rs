@@ -170,13 +170,6 @@ async fn run_client(args: cli::ClientArgs) -> i32 {
         verbose: args.verbose,
     };
 
-    let result = client::run_client(config).await;
-
-    if result == 0 {
-        info!("Transfer completed successfully");
-    } else {
-        error!("Transfer failed");
-    }
-
-    result
+    // run_client handles its own outcome + elapsed logging
+    client::run_client(config).await
 }

@@ -34,6 +34,7 @@ use tokio_rustls::TlsAcceptor;
 
 mod file_receiver;
 mod handler;
+mod metadata;
 mod tls;
 
 use file_receiver::FileReceiver;
@@ -169,6 +170,8 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
     loop {
         match control_listener.accept().await {
             Ok((stream, addr)) => {
+                info!("Client connected: {}", addr);
+                let addr_str = addr.to_string();
                 let _tls_ctx = tls_ctx.clone();
                 let output_dir = output_dir.clone();
                 let temp_dir = temp_dir.clone();
@@ -188,6 +191,7 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
                             Ok(tls_stream) => {
                                 handler::handle_control_connection(
                                     tls_stream,
+                                    &addr_str,
                                     &output_dir,
                                     &temp_dir,
                                     max_parallel,
@@ -195,13 +199,14 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
                                 .await
                             }
                             Err(e) => {
-                                error!("TLS handshake failed from {}: {}", addr, e);
+                                error!("TLS handshake failed from {}: {}", addr_str, e);
                                 return;
                             }
                         }
                     } else {
                         handler::handle_control_connection(
                             stream,
+                            &addr_str,
                             &output_dir,
                             &temp_dir,
                             max_parallel,
@@ -210,7 +215,7 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
                     };
 
                     if let Err(e) = result {
-                        error!("Error handling control connection from {}: {}", addr, e);
+                        error!("Error handling control connection from {}: {}", addr_str, e);
                     }
                 });
             }
