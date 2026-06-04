@@ -80,6 +80,7 @@ pub async fn run_client(config: ClientConfig) -> i32 {
         setup_workers(&config, num_chunks, &data_ports, file_size);
 
     // Run workers
+    let shutdown_check = shutdown_flag.clone();
     let all_failed = run_workers(
         &config,
         worker_assignments,
@@ -89,6 +90,11 @@ pub async fn run_client(config: ClientConfig) -> i32 {
         shutdown_flag,
     )
     .await;
+
+    if shutdown_check.load(Ordering::SeqCst) {
+        info!("Transfer interrupted, exiting without server confirmation");
+        return 0;
+    }
 
     if !all_failed.is_empty() {
         error!("Failed chunks: {:?}", all_failed);

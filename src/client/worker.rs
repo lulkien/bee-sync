@@ -33,7 +33,11 @@ pub struct WorkerConfig {
     pub retries: usize,
 }
 
-/// Send one chunk over persistent connection
+/// Send one chunk over persistent connection.
+///
+/// When `shutdown_flag` is set after the data has been sent, the function
+/// returns `Ok(true)` immediately without waiting for a server ACK — the
+/// chunk is on the wire but delivery is not confirmed.
 pub async fn send_chunk(
     stream: &mut TcpStream,
     filepath: &str,
@@ -41,6 +45,7 @@ pub async fn send_chunk(
     chunk_offset: u64,
     chunk_size: usize,
     retries: usize,
+    shutdown_flag: &AtomicBool,
 ) -> Result<bool> {
     let mut file = fs::File::open(filepath)?;
 
@@ -71,6 +76,12 @@ pub async fn send_chunk(
         )
         .await
         .map_err(|_| anyhow!("send chunk {} timed out after {:?}", chunk_index, timeout))??;
+
+        // If shutdown was requested while we were sending, skip the ACK wait.
+        // The data is on the wire but we won't block on server confirmation.
+        if shutdown_flag.load(Ordering::SeqCst) {
+            return Ok(true);
+        }
 
         let ack = tokio::time::timeout(timeout, frame::recv(stream))
             .await
@@ -185,6 +196,7 @@ pub async fn worker(config: WorkerConfig) -> (Vec<usize>, Vec<usize>) {
                     offset,
                     actual_size,
                     config.retries,
+                    &config.shutdown_flag,
                 )
                 .await
                 {
