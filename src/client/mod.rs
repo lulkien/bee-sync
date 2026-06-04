@@ -55,6 +55,7 @@ pub struct ClientConfig {
 pub async fn run_client(config: ClientConfig) -> i32 {
     let started = Instant::now();
 
+    let mut interrupted = false;
     #[allow(clippy::never_loop)]
     let exit_code = loop {
         // Setup transfer
@@ -96,7 +97,8 @@ pub async fn run_client(config: ClientConfig) -> i32 {
         )
         .await;
 
-        if shutdown_check.load(Ordering::SeqCst) {
+        interrupted = shutdown_check.load(Ordering::SeqCst);
+        if interrupted {
             info!("Transfer interrupted, exiting without server confirmation");
             break 0;
         }
@@ -129,7 +131,11 @@ pub async fn run_client(config: ClientConfig) -> i32 {
     };
 
     let elapsed = started.elapsed();
-    info!("Transfer finished in {:.2}s", elapsed.as_secs_f64());
+    if interrupted {
+        info!("Transfer interrupted after {:.2}s", elapsed.as_secs_f64());
+    } else {
+        info!("Transfer completed in {:.2}s", elapsed.as_secs_f64());
+    }
 
     exit_code
 }
@@ -455,14 +461,14 @@ async fn run_workers(
         }
     }
 
-    // Finish progress bar (abandon if any chunk failed, so it doesn't lie at 100%)
+    // Finish progress bar (abandon if shutdown or any chunk failed)
     {
         let pb = progress_bar.lock().unwrap();
 
-        if all_failed.is_empty() {
-            pb.finish();
-        } else {
+        if !all_failed.is_empty() || shutdown_flag.load(Ordering::SeqCst) {
             pb.abandon();
+        } else {
+            pb.finish();
         }
     }
 
