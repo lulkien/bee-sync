@@ -198,9 +198,7 @@ pub async fn handle_control_connection(
         }
     }
 
-    // Cleanup
-    cleanup(&ports, data_tasks);
-
+    // Log result before cleanup
     if success {
         info!(
             "[{}] Transfer complete: {} ({} bytes, {} chunks)",
@@ -212,6 +210,16 @@ pub async fn handle_control_connection(
             client_addr, handshake.filename, handshake.file_size, handshake.num_chunks
         );
     }
+
+    // Brief grace period: let client workers connect and query before we
+    // tear down receivers. Without this, a resume where all chunks are
+    // already present causes a race — the server assembles and cleans up
+    // before the client's workers can connect, producing spurious
+    // "Connection reset" errors on the client side.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Cleanup
+    cleanup(&ports, data_tasks);
 
     Ok(())
 }
