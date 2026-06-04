@@ -279,9 +279,11 @@ fn verify_and_write_chunk(
             return Ok(chunk::ACK_HASH_MISMATCH);
         }
 
-        {
-            let mut recv = receiver.lock().unwrap();
-            recv.received_chunks[chunk_index] = true;
+        // Record chunk + persist metadata (BLAKE3 hash for resume verification)
+        if let Err(e) = receiver.lock().unwrap().record_chunk(chunk_index, *chunk_hash_rcvd) {
+            error!("Failed to save metadata for chunk {}: {}", chunk_index, e);
+            receiver.lock().unwrap().failed = true;
+            return Ok(chunk::ACK_HASH_MISMATCH);
         }
 
         debug!(

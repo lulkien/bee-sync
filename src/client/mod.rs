@@ -11,6 +11,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
+    time::Instant,
 };
 
 use anyhow::{Result, anyhow};
@@ -52,75 +53,85 @@ pub struct ClientConfig {
 
 /// Main client entry point
 pub async fn run_client(config: ClientConfig) -> i32 {
-    // Setup transfer
-    let (file_size, num_chunks) = setup_transfer(&config);
+    let started = Instant::now();
 
-    // Perform handshake
-    let (mut control_sock, status, data_ports) = match perform_handshake(&config).await {
-        Ok(result) => result,
-        Err(code) => return code,
+    #[allow(clippy::never_loop)]
+    let exit_code = loop {
+        // Setup transfer
+        let (file_size, num_chunks) = setup_transfer(&config);
+
+        // Perform handshake
+        let (mut control_sock, status, data_ports) = match perform_handshake(&config).await {
+            Ok(result) => result,
+            Err(code) => break code,
+        };
+
+        match status {
+            handshake::RESP_OK => {
+                debug!("Data ports: {:?}", data_ports);
+            }
+            handshake::RESP_EXISTS => {
+                info!("File already exists on server, nothing to transfer");
+                break 0;
+            }
+            _ => {
+                error!("Server rejected handshake (status={})", status);
+                break 1;
+            }
+        };
+
+        // Setup workers
+        let (worker_assignments, shutdown_flag, progress_bar) =
+            setup_workers(&config, num_chunks, &data_ports, file_size);
+
+        // Run workers
+        let shutdown_check = shutdown_flag.clone();
+        let all_failed = run_workers(
+            &config,
+            worker_assignments,
+            data_ports,
+            file_size,
+            progress_bar,
+            shutdown_flag,
+        )
+        .await;
+
+        if shutdown_check.load(Ordering::SeqCst) {
+            info!("Transfer interrupted, exiting without server confirmation");
+            break 0;
+        }
+
+        if !all_failed.is_empty() {
+            error!("Failed chunks: {:?}", all_failed);
+            break 1;
+        }
+
+        // Wait for server to confirm assembly
+        info!(
+            "All {} chunks sent, waiting for server confirmation...",
+            num_chunks
+        );
+
+        break match recv_final_status(&mut control_sock).await {
+            Ok(true) => {
+                info!("Server confirmed transfer complete");
+                0
+            }
+            Ok(false) => {
+                error!("Server reported transfer failure");
+                1
+            }
+            Err(e) => {
+                error!("Failed to receive server confirmation: {}", e);
+                1
+            }
+        };
     };
 
-    match status {
-        handshake::RESP_OK => {
-            debug!("Data ports: {:?}", data_ports);
-        }
-        handshake::RESP_EXISTS => {
-            info!("File already exists on server, nothing to transfer");
-            return 0;
-        }
-        _ => {
-            error!("Server rejected handshake (status={})", status);
-            return 1;
-        }
-    };
+    let elapsed = started.elapsed();
+    info!("Transfer finished in {:.2}s", elapsed.as_secs_f64());
 
-    // Setup workers
-    let (worker_assignments, shutdown_flag, progress_bar) =
-        setup_workers(&config, num_chunks, &data_ports, file_size);
-
-    // Run workers
-    let shutdown_check = shutdown_flag.clone();
-    let all_failed = run_workers(
-        &config,
-        worker_assignments,
-        data_ports,
-        file_size,
-        progress_bar,
-        shutdown_flag,
-    )
-    .await;
-
-    if shutdown_check.load(Ordering::SeqCst) {
-        info!("Transfer interrupted, exiting without server confirmation");
-        return 0;
-    }
-
-    if !all_failed.is_empty() {
-        error!("Failed chunks: {:?}", all_failed);
-        return 1;
-    }
-
-    // Wait for server to confirm assembly
-    info!(
-        "All {} chunks sent, waiting for server confirmation...",
-        num_chunks
-    );
-
-    match recv_final_status(&mut control_sock).await {
-        Ok(true) => {
-            info!("Server confirmed transfer complete");
-            0
-        }
-        Ok(false) => {
-            error!("Server reported transfer failure");
-            1
-        }
-        Err(e) => {
-            error!("Failed to receive server confirmation: {}", e);
-            1
-        }
-    }
+    exit_code
 }
 
 /// Build handshake message for given file
