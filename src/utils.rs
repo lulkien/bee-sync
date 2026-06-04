@@ -91,45 +91,48 @@ pub async fn download_file(url: &str, temp_dir: &str, verbose: bool) -> Result<S
     let mut file = tokio::fs::File::create(&dest).await?;
     let mut stream = response.bytes_stream();
 
-    if verbose || !std::io::stderr().is_terminal() {
-        // Non-TTY: periodic log messages
-        use futures_util::StreamExt;
-        let mut downloaded: u64 = 0;
-        let mut last_log = std::time::Instant::now();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            file.write_all(&chunk).await?;
-            downloaded += chunk.len() as u64;
-            if last_log.elapsed() >= std::time::Duration::from_secs(3) {
-                let pct = if total > 0 {
-                    downloaded as f64 / total as f64 * 100.0
-                } else {
-                    0.0
-                };
-                log::info!("Download progress: {:.1}% ({}/{})", pct, downloaded, total);
-                last_log = std::time::Instant::now();
-            }
-        }
-        log::info!("Downloaded {} bytes ({})", total, filename);
-    } else {
-        // TTY: indicatif progress bar
-        let pb = indicatif::ProgressBar::new(total);
-        pb.set_style(
+    use futures_util::StreamExt;
+
+    // Progress reporting: indicatif bar on TTY, periodic logs otherwise
+    let use_tty = !verbose && std::io::stderr().is_terminal();
+    let pb = if use_tty {
+        let bar = indicatif::ProgressBar::new(total);
+        bar.set_style(
             indicatif::ProgressStyle::default_bar()
                 .template(
                     "[{bar:40}] {percent:>3}% {bytes:>10}/{total_bytes} {bytes_per_sec} eta {eta}",
                 )
                 .unwrap(),
         );
-        use futures_util::StreamExt;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            file.write_all(&chunk).await?;
-            pb.inc(chunk.len() as u64);
+        Some(bar)
+    } else {
+        None
+    };
+
+    let mut downloaded: u64 = 0;
+    let mut last_log = std::time::Instant::now();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        file.write_all(&chunk).await?;
+        downloaded += chunk.len() as u64;
+
+        if let Some(ref bar) = pb {
+            bar.inc(chunk.len() as u64);
+        } else if last_log.elapsed() >= std::time::Duration::from_secs(3) {
+            let pct = if total > 0 {
+                downloaded as f64 / total as f64 * 100.0
+            } else {
+                0.0
+            };
+            log::info!("Download progress: {:.1}% ({}/{})", pct, downloaded, total);
+            last_log = std::time::Instant::now();
         }
-        pb.finish();
-        pb.tick();
-        log::info!("Downloaded {} bytes ({})", total, filename);
     }
+
+    if let Some(bar) = pb {
+        bar.finish();
+    }
+    log::info!("Downloaded {} bytes ({})", total, filename);
     Ok(dest.to_string_lossy().to_string())
 }

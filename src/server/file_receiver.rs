@@ -196,7 +196,9 @@ impl FileReceiver {
         }
 
         // Clean up metadata on successful assembly
-        let _ = fs::remove_file(TransferMetadata::meta_path(&self.parts_dir, &self.filename));
+        if let Err(e) = fs::remove_file(TransferMetadata::meta_path(&self.parts_dir, &self.filename)) {
+            log::warn!("Failed to remove metadata file: {}", e);
+        }
 
         let actual_hash: [u8; 32] = hasher.finalize().into();
         Ok(actual_hash == self.full_hash)

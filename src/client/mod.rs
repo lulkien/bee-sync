@@ -59,7 +59,13 @@ pub async fn run_client(config: ClientConfig) -> i32 {
     #[allow(clippy::never_loop)]
     let exit_code = loop {
         // Setup transfer
-        let (file_size, num_chunks) = setup_transfer(&config);
+        let (file_size, num_chunks) = match setup_transfer(&config) {
+            Ok(t) => t,
+            Err(e) => {
+                error!("{}", e);
+                break 1;
+            }
+        };
 
         // Perform handshake
         let (mut control_sock, status, data_ports) = match perform_handshake(&config).await {
@@ -232,14 +238,11 @@ pub fn parse_response(data: &[u8]) -> Result<(u8, Vec<u16>)> {
 /// * `config` - Client configuration containing file path and chunk size
 ///
 /// # Returns
-/// * `(u64, usize)` - Tuple of (file_size, num_chunks)
-///
-/// # Panics
-/// * Exits with code 1 if file not found
-fn setup_transfer(config: &ClientConfig) -> (u64, usize) {
+/// * `Ok((file_size, num_chunks))` on success
+/// * `Err(_)` if file not found
+fn setup_transfer(config: &ClientConfig) -> Result<(u64, usize)> {
     if !std::path::Path::new(&config.filepath).is_file() {
-        error!("File not found: {}", config.filepath);
-        std::process::exit(1);
+        return Err(anyhow!("File not found: {}", config.filepath));
     }
 
     let file_size = std::fs::metadata(&config.filepath)
@@ -252,7 +255,7 @@ fn setup_transfer(config: &ClientConfig) -> (u64, usize) {
         1
     };
 
-    (file_size, num_chunks)
+    Ok((file_size, num_chunks))
 }
 
 /// Perform handshake with server

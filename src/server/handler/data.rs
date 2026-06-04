@@ -272,24 +272,28 @@ fn verify_and_write_chunk(
     let chunk_hash_calc = file_ops::calc_hash(chunk_data);
 
     if chunk_hash_calc == *chunk_hash_rcvd {
-        let part_path = receiver.lock().unwrap().part_path(chunk_index);
+        // Hold one lock across all receiver mutations
+        let part_path = {
+            let recv = receiver.lock().unwrap();
+            recv.part_path(chunk_index)
+        };
         if let Err(e) = fs::write(&part_path, chunk_data) {
             error!("Failed to write chunk {}: {}", chunk_index, e);
             receiver.lock().unwrap().failed = true;
             return Ok(chunk::ACK_HASH_MISMATCH);
         }
 
-        // Record chunk + persist metadata (BLAKE3 hash for resume verification)
-        if let Err(e) = receiver.lock().unwrap().record_chunk(chunk_index, *chunk_hash_rcvd) {
+        let mut recv = receiver.lock().unwrap();
+        if let Err(e) = recv.record_chunk(chunk_index, *chunk_hash_rcvd) {
             error!("Failed to save metadata for chunk {}: {}", chunk_index, e);
-            receiver.lock().unwrap().failed = true;
+            recv.failed = true;
             return Ok(chunk::ACK_HASH_MISMATCH);
         }
 
         debug!(
             "Chunk {}/{} OK ({} bytes)",
             chunk_index,
-            receiver.lock().unwrap().num_chunks,
+            recv.num_chunks,
             chunk_data.len()
         );
         Ok(chunk::ACK_OK)
