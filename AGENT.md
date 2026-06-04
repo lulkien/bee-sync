@@ -14,7 +14,7 @@ Fast parallel file transfer over TCP/TLS with chunked concurrency, BLAKE3 integr
 | ------- | ----- | ----- |
 | Error handling | `anyhow` | Use `anyhow::Result<T>` everywhere. Use `anyhow::bail!()` for early returns, `anyhow::anyhow!()` for ad-hoc errors. |
 | Async runtime | `tokio` (full features) | All I/O is async. Prefer `tokio::spawn` for concurrent tasks. Use `tokio::net::TcpStream` / `TcpListener`. |
-| CLI parsing | `clap` (derive) | `#[derive(Parser)]` / `#[derive(Subcommand)]`. `requires` for dependent flags (e.g. `--tls-no-verify` requires `--tls`). |
+| CLI parsing | `clap` (derive) | `#[derive(Parser)]` / `#[derive(Subcommand)]`. `requires` for dependent flags, `conflicts_with` for mutual exclusion. |
 | Logging | `fern` + `log` | Use `log::info!()`, `log::error!()`, `log::debug!()`. Logger initialized in `src/main.rs` (`init_logging`). `--verbose` enables debug level. |
 | Progress bars | `indicatif` | Use `ProgressBar` for transfer progress. Wrap in `Arc<Mutex<ProgressBar>>` for shared access across workers. |
 | TLS | `rustls` 0.23 + `tokio-rustls` + `webpki-roots` | Server uses `TlsAcceptor`, client uses `TlsConnector`. Custom `NoCertVerifier` for `--tls-no-verify`. |

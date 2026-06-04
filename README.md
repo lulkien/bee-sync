@@ -66,8 +66,8 @@ bee-sync client --url URL [OPTIONS]
 | `-f`, `--file` | *(required)* | File to send (mutually exclusive with `--url`) |
 | `-u`, `--url` | — | Download from URL then send |
 | `-a`, `--address` | `localhost:19999` | Server address (host:port) |
-| `-s`, `--chunk-size` | `2M` | Chunk size (e.g. `1M`, `10M`, `1G`) |
-| `-n`, `--chunk-count` | — | Split into N chunks instead of using `--chunk-size` |
+| `-s`, `--chunk-size` | `2M` | Chunk size, e.g. `1M`, `10M` (mutually exclusive with `--chunk-count`) |
+| `-n`, `--chunk-count` | — | Split into N chunks instead (mutually exclusive with `--chunk-size`) |
 | `-p`, `--parallel` | `25` | Max parallel data connections |
 | `-r`, `--retries` | `3` | Retries per chunk |
 | `-t`, `--temp-dir` | `/tmp` | Temp directory for URL downloads |
