@@ -1,23 +1,27 @@
 # bee-sync
 
 A fast, parallel file transfer tool written in Rust. Transfers files over TCP/TLS with
-concurrent chunked connections, BLAKE3 integrity verification, and resume support.
+concurrent chunked connections, BLAKE3 integrity verification, and verified resume support.
 
 ## Features
 
-- **Parallel transfer** — multiple TCP connections transfer chunks concurrently for high
+- **Parallel transfer** — 25 concurrent TCP connections transfer chunks in parallel for high
   throughput even on low-bandwidth-per-connection links
-- **Resume support** — interrupted transfers pick up where they left off without re-sending
-  already-received chunks
-- **TLS encryption** — control channel is encrypted with `rustls`; optional certificate
-  verification skip for self-signed certs
+- **Verified resume** — per-chunk BLAKE3 hashes persisted to `.bee-meta` files. On resume,
+  transfer parameters are validated and every `.part` is re-hashed to detect corruption
+  or chunk-size mismatches
+- **TLS encryption** — control channel encrypted with `rustls`; `--tls-no-verify` for
+  self-signed certs (requires `--tls`)
 - **BLAKE3 hashing** — fast, cryptographically secure integrity checks on every chunk and
   the assembled file (~3–5 GB/s per core)
+- **Graceful shutdown** — Ctrl+C on client finishes in-flight chunks and exits cleanly;
+  on server stops accepting new connections and lets active transfers complete
 - **Dynamic timeouts** — per-operation timeouts scale with chunk size (150 KB/s floor),
   with automatic backoff on retry
 - **DoS hardening** — frame size limits, connection caps, port-pool semaphore, and input
   validation throughout
 - **Progress bar** — live transfer progress with speed and ETA
+- **URL download** — client can download from a URL before transferring to the server
 
 ## Quick Start
 
@@ -54,18 +58,21 @@ bee-sync server [OPTIONS]
 
 ```
 bee-sync client --file PATH [OPTIONS]
+bee-sync client --url URL [OPTIONS]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-f`, `--file` | *(required)* | File to send |
+| `-f`, `--file` | *(required)* | File to send (mutually exclusive with `--url`) |
+| `-u`, `--url` | — | Download from URL then send |
 | `-a`, `--address` | `localhost:19999` | Server address (host:port) |
-| `-s`, `--chunk-size` | `5M` | Chunk size (e.g. `1M`, `10M`, `1G`) |
-| `-n`, `--chunk-count` | — | Split into N chunks |
-| `-p`, `--parallel` | `10` | Max parallel data connections |
+| `-s`, `--chunk-size` | `2M` | Chunk size (e.g. `1M`, `10M`, `1G`) |
+| `-n`, `--chunk-count` | — | Split into N chunks instead of using `--chunk-size` |
+| `-p`, `--parallel` | `25` | Max parallel data connections |
 | `-r`, `--retries` | `3` | Retries per chunk |
+| `-t`, `--temp-dir` | `/tmp` | Temp directory for URL downloads |
 | `--tls` | — | Enable TLS |
-| `--tls-no-verify` | — | Skip certificate verification |
+| `--tls-no-verify` | — | Skip certificate verification (requires `--tls`) |
 | `-v`, `--verbose` | — | Enable debug logging |
 
 ### Examples
@@ -85,6 +92,9 @@ bee-sync client --chunk-count 8 --file largefile.bin
 # Custom server port and output directory
 bee-sync server --address 0.0.0.0:8080 --output /srv/staging
 bee-sync client --address myserver.local:8080 --file data.bin
+
+# Download from URL then transfer
+bee-sync client --url https://example.com/file.bin
 ```
 
 ## Architecture
@@ -109,6 +119,9 @@ Client  ════════════════════════
 - **Data connections** (ports 45000–46000): plain TCP, one per worker, persistent
   across multiple chunks. Client queries for already-received chunks before sending
   (resume)
+- **Metadata** (`.bee-meta`): binary file stored alongside `.part` files with
+  transfer parameters and per-chunk BLAKE3 hashes. Enables safe resume with
+  corruption detection and chunk-size validation
 - After all chunks arrive, the server assembles the `.part` files, verifies the
   full-file BLAKE3 hash, and sends a final status to the client
 
@@ -125,27 +138,40 @@ Every wire message is a length-prefixed frame: 4-byte big-endian length + payloa
 | Resume query | `QUERY_MAGIC(0x01)` |
 | Resume response | `count(4,BE) + indices(N×4,BE)` |
 
+### Metadata format (`.bee-meta`)
+
+| Offset | Size | Field |
+|--------|------|-------|
+| 0 | 4 | Magic `"BEMT"` |
+| 4 | 1 | Version (1) |
+| 5 | 4 | chunk_size (u32 BE) |
+| 9 | 4 | num_chunks (u32 BE) |
+| 13 | 8 | file_size (u64 BE) |
+| 21 | 32 | full_hash (BLAKE3) |
+| 53 | 4 | entry count (u32 BE) |
+| 57 | N×36 | entries: chunk_index(u32 BE) + chunk_hash(32 bytes) |
+
 ## Build from Source
 
 Requires Rust 1.82+ (edition 2024).
 
 ```bash
-git clone https://github.com/your-org/bee-sync.git
+git clone https://github.com/lulkien/bee-sync.git
 cd bee-sync
 cargo build --release
 ```
 
 ## Security
 
-A [full security audit](SECURITY.md) is available. All critical and high-severity findings
-have been addressed:
-
 - ✅ Frame size limits (16 MiB) prevent memory exhaustion
 - ✅ Chunk count capped at 1,000,000
 - ✅ Bounds checks on all network-provided indices
 - ✅ Per-operation timeouts with throughput-aware duration
 - ✅ Connection and port-pool limits prevent resource exhaustion
-- ✅ BLAKE3 replaces MD5 for cryptographic integrity
+- ✅ BLAKE3 for cryptographic integrity
+- ✅ Per-chunk hash verification on resume detects disk corruption
+- ✅ Chunk-size validation on resume prevents mismatched reassembly
+- ✅ Chunk size overflow guard rejects values > `usize::MAX`
 
 ## License
 
