@@ -45,7 +45,16 @@ pub fn parse_chunk_size(value: &str) -> Result<usize> {
             _ => 1.0,
         };
 
-        Ok((num * multiplier) as usize)
+        let bytes = num * multiplier;
+        // Guard against overflow when casting to usize
+        if bytes > usize::MAX as f64 {
+            return Err(anyhow!(
+                "Chunk size too large: {} (max {} bytes)",
+                value,
+                usize::MAX
+            ));
+        }
+        Ok(bytes as usize)
     } else {
         value
             .parse()
@@ -61,14 +70,15 @@ pub async fn download_file(url: &str, temp_dir: &str, verbose: bool) -> Result<S
     let dir = Path::new(temp_dir);
     tokio::fs::create_dir_all(dir).await?;
 
-    // Extract filename from URL path, default to "download" if none
-    let url_path = url
-        .split('?') // strip query params
-        .next()
-        .unwrap_or("");
-    let filename = url_path
-        .split('/')
-        .rfind(|s| !s.is_empty())
+    // Extract filename from URL path. Walk segments right-to-left,
+    // picking the last non-empty segment that looks like a filename.
+    // Fall back to "download" if URL ends with '/' or has no path.
+    let path_part = url.split('?').next().unwrap_or("");
+    let segments: Vec<&str> = path_part.split('/').filter(|s| !s.is_empty()).collect();
+    let filename = segments
+        .last()
+        .filter(|s| s.contains('.'))
+        .copied()
         .unwrap_or("download");
     let dest = dir.join(filename);
 

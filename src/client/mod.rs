@@ -114,7 +114,7 @@ pub async fn run_client(config: ClientConfig) -> i32 {
             num_chunks
         );
 
-        break match recv_final_status(&mut control_sock).await {
+        break match recv_final_status(&mut control_sock, file_size).await {
             Ok(true) => {
                 info!("Server confirmed transfer complete");
                 0
@@ -321,9 +321,16 @@ async fn perform_handshake(config: &ClientConfig) -> Result<(Box<dyn Stream>, u8
     Ok((control_sock, status, data_ports))
 }
 
-/// Receive final transfer status from server after assembly
-async fn recv_final_status(stream: &mut (impl tokio::io::AsyncRead + Unpin)) -> Result<bool> {
-    let data = frame::recv_timeout(stream).await?;
+/// Receive final transfer status from server after assembly.
+///
+/// Uses a timeout that scales with `file_size` to account for assembly time
+/// on the server side (reading + hashing all parts).
+async fn recv_final_status(
+    stream: &mut (impl tokio::io::AsyncRead + Unpin),
+    file_size: u64,
+) -> Result<bool> {
+    let timeout = frame::timeout_for_bytes(file_size as usize);
+    let data = frame::recv_with_timeout(stream, timeout).await?;
 
     if data.is_empty() {
         return Ok(false);

@@ -110,12 +110,12 @@ impl FileReceiver {
         }
 
         // Verify every claimed .part file against its stored hash
-        let mut valid_count = 0;
+        let mut valid_indices: Vec<usize> = Vec::new();
         let mut corrupt_count = 0;
 
         for &idx in meta.chunk_hashes.keys() {
             if meta.verify_part(idx, &self.parts_dir, &self.filename) {
-                valid_count += 1;
+                valid_indices.push(idx);
             } else {
                 // Remove the corrupt .part file
                 let part_path = self.part_path(idx);
@@ -131,7 +131,7 @@ impl FileReceiver {
                 meta.chunk_hashes.len()
             );
 
-            if valid_count == 0 {
+            if valid_indices.is_empty() {
                 // All chunks corrupt → purge everything
                 TransferMetadata::purge(&self.parts_dir, &self.filename, self.num_chunks);
                 return None;
@@ -145,10 +145,8 @@ impl FileReceiver {
                 self.full_hash,
             );
 
-            for &idx in meta.chunk_hashes.keys() {
-                if meta.verify_part(idx, &self.parts_dir, &self.filename) {
-                    clean_meta.add_chunk(idx, meta.chunk_hashes[&idx]);
-                }
+            for &idx in &valid_indices {
+                clean_meta.add_chunk(idx, meta.chunk_hashes[&idx]);
             }
 
             if let Err(e) = clean_meta.save(&self.parts_dir, &self.filename) {
