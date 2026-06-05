@@ -3,7 +3,7 @@ use fern::Dispatch;
 use log::{LevelFilter, error, info};
 use std::{fs, io, process};
 
-use bee_sync::{
+use bee_sync_core::{
     ClientConfig, ServerConfig,
     cli::{Cli, Commands},
     client, server, utils,
@@ -40,7 +40,7 @@ fn init_logging(verbose: bool) {
         .ok();
 }
 
-async fn run_server(args: bee_sync::cli::ServerArgs) -> i32 {
+async fn run_server(args: bee_sync_core::cli::ServerArgs) -> i32 {
     let (bind_host, port) = match utils::parse_address(&args.address) {
         Ok((h, p)) => (h, p),
         Err(e) => {
@@ -77,7 +77,7 @@ async fn run_server(args: bee_sync::cli::ServerArgs) -> i32 {
     }
 }
 
-async fn run_client(args: bee_sync::cli::ClientArgs) -> i32 {
+async fn run_client(args: bee_sync_core::cli::ClientArgs) -> i32 {
     let filepath = match (args.file, args.url) {
         (Some(f), None) => f,
         (None, Some(url)) => match utils::download_file(&url, &args.temp_dir, args.verbose).await {
@@ -126,7 +126,7 @@ async fn run_client(args: bee_sync::cli::ClientArgs) -> i32 {
         let size_str = args
             .chunk_size
             .as_deref()
-            .unwrap_or(bee_sync::DEFAULT_CHUNK_SIZE);
+            .unwrap_or(bee_sync_core::DEFAULT_CHUNK_SIZE);
         match utils::parse_chunk_size(size_str) {
             Ok(s) => s,
             Err(e) => {

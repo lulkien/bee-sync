@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bee-sync = { path = ".." }
+bee-sync-core = { path = "../bee-sync-core" }
 slint = "1"
 tokio = { version = "1", features = ["full"] }
 log = "0.4"

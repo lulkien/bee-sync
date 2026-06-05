@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use bee_sync::server::{ServerConfig, run_server};
+use bee_sync_core::server::{ServerConfig, run_server};
 use slint::ComponentHandle;
 
 slint::include_modules!();
