@@ -3,6 +3,14 @@
 A fast, parallel file transfer tool written in Rust. Transfers files over TCP/TLS with
 concurrent chunked connections, BLAKE3 integrity verification, and verified resume support.
 
+## Crates
+
+| Crate | Type | Description |
+|-------|------|-------------|
+| `bee-sync-core` | lib | Protocol, server, client, CLI types, utilities |
+| `bee-sync-cli` | bin | Command-line client and server |
+| `bee-sync-gui` | bin | Slint-based server dashboard (Windows/Linux/macOS) |
+
 ## Features
 
 - **Parallel transfer** — 25 concurrent TCP connections transfer chunks in parallel for high
@@ -22,18 +30,30 @@ concurrent chunked connections, BLAKE3 integrity verification, and verified resu
   validation throughout
 - **Progress bar** — live transfer progress with speed and ETA
 - **URL download** — client can download from a URL before transferring to the server
+- **GUI dashboard** — standalone server monitor with config, log, and transfer status
 
 ## Quick Start
 
 ```bash
-# Build
+# Build everything
 cargo build --release
 
+# Build CLI only
+cargo build -p bee-sync-cli --release
+
+# Build GUI only
+cargo build -p bee-sync-gui --release
+```
+
+```bash
 # Start server (plain TCP)
-./target/release/bee-sync server
+./target/release/bee-sync-cli server
+
+# Or use the GUI
+./target/release/bee-sync-gui
 
 # Send a file
-./target/release/bee-sync client --file myfile.bin
+./target/release/bee-sync-cli client --file myfile.bin
 ```
 
 ## Usage
@@ -41,7 +61,7 @@ cargo build --release
 ### Server
 
 ```
-bee-sync server [OPTIONS]
+bee-sync-cli server [OPTIONS]
 ```
 
 | Flag | Default | Description |
@@ -54,11 +74,22 @@ bee-sync server [OPTIONS]
 | `-m`, `--max-parallel` | `100` | Maximum parallel data connections per transfer |
 | `-v`, `--verbose` | — | Enable debug logging |
 
+### Server GUI
+
+```
+bee-sync-gui
+```
+
+Launches a native Slint window with three tabs:
+- **Dashboard** — active transfer count, server status, bind info
+- **Log** — scrollable log output
+- **Config** — bind address, port, output dir, TLS cert/key, max parallel
+
 ### Client
 
 ```
-bee-sync client --file PATH [OPTIONS]
-bee-sync client --url URL [OPTIONS]
+bee-sync-cli client --file PATH [OPTIONS]
+bee-sync-cli client --url URL [OPTIONS]
 ```
 
 | Flag | Default | Description |
@@ -79,22 +110,22 @@ bee-sync client --url URL [OPTIONS]
 
 ```bash
 # Basic transfer
-bee-sync server
-bee-sync client --file ubuntu.iso
+bee-sync-cli server
+bee-sync-cli client --file ubuntu.iso
 
 # TLS with self-signed cert
-bee-sync server --cert cert.pem --key key.pem
-bee-sync client --tls --tls-no-verify --file ubuntu.iso
+bee-sync-cli server --cert cert.pem --key key.pem
+bee-sync-cli client --tls --tls-no-verify --file ubuntu.iso
 
 # Custom chunking: split into exactly 8 chunks
-bee-sync client --chunk-count 8 --file largefile.bin
+bee-sync-cli client --chunk-count 8 --file largefile.bin
 
 # Custom server port and output directory
-bee-sync server --address 0.0.0.0:8080 --output /srv/staging
-bee-sync client --address myserver.local:8080 --file data.bin
+bee-sync-cli server --address 0.0.0.0:8080 --output /srv/staging
+bee-sync-cli client --address myserver.local:8080 --file data.bin
 
 # Download from URL then transfer
-bee-sync client --url https://example.com/file.bin
+bee-sync-cli client --url https://example.com/file.bin
 ```
 
 ## Architecture
@@ -138,6 +169,15 @@ Every wire message is a length-prefixed frame: 4-byte big-endian length + payloa
 | Resume query | `QUERY_MAGIC(0x01)` |
 | Resume response | `count(4,BE) + indices(N×4,BE)` |
 
+### Response codes
+
+| Code | Name | Meaning |
+|------|------|---------|
+| `0` | `RESP_OK` | Transfer accepted, data ports follow |
+| `1` | `RESP_ERR` | Server error |
+| `2` | `RESP_EXISTS` | File already exists with matching hash |
+| `3` | `RESP_COMPLETE` | All chunks already valid, no ports needed |
+
 ### Metadata format (`.bee-meta`)
 
 | Offset | Size | Field |
@@ -153,12 +193,34 @@ Every wire message is a length-prefixed frame: 4-byte big-endian length + payloa
 
 ## Build from Source
 
-Requires Rust 1.82+ (edition 2024).
+Requires Rust 1.94+ (edition 2024).
 
 ```bash
 git clone https://github.com/lulkien/bee-sync.git
 cd bee-sync
+
+# CLI only
+cargo build -p bee-sync-cli --release
+
+# GUI (requires Slint's system dependencies)
+cargo build -p bee-sync-gui --release
+
+# Everything
 cargo build --release
+```
+
+## Project Structure
+
+```
+bee-sync/
+├── Cargo.toml              # workspace root
+├── bee-sync-core/           # lib: protocol, server, client, utils
+│   └── src/
+├── bee-sync-cli/            # bin: CLI (clap)
+│   └── src/main.rs
+└── bee-sync-gui/            # bin: Slint server dashboard
+    ├── src/main.rs
+    └── ui/main.slint
 ```
 
 ## Security
