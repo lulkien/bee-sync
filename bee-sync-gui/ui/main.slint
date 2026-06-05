@@ -1,0 +1,145 @@
+import { VerticalBox, HorizontalBox, Button, LineEdit, ComboBox, TabWidget } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: "bee-sync Server";
+    preferred-width: 800px;
+    preferred-height: 600px;
+
+    // ── Server Config ──
+    in-out property<string> bind-address: "0.0.0.0";
+    in-out property<string> port: "19999";
+    in-out property<string> output-dir: "./received";
+    in-out property<string> cert-path: "";
+    in-out property<string> key-path: "";
+    in-out property<string> max-parallel: "100";
+
+    // ── Server State ──
+    in-out property<bool> server-running: false;
+    in-out property<string> server-status: "Stopped";
+    in-out property<int> active-transfers: 0;
+
+    // ── Log ──
+    in-out property<string> log-text: "";
+
+    VerticalBox {
+        padding: 12px;
+        spacing: 8px;
+
+        // ── Header ──
+        HorizontalBox {
+            alignment: center;
+            Text {
+                text: "bee-sync Server";
+                font-size: 22px;
+                font-weight: 700;
+            }
+            Text {
+                text: root.server-status;
+                color: root.server-running ? #22c55e : #ef4444;
+                font-weight: 600;
+            }
+            Button {
+                text: root.server-running ? "Stop" : "Start";
+                clicked => { root.start-stop-server(); }
+            }
+        }
+
+        // ── Tabs ──
+        TabWidget {
+            Tab {
+                title: "Dashboard";
+                VerticalBox {
+                    spacing: 8px;
+                    padding: 8px;
+
+                    Text {
+                        text: "Active Transfers: " + root.active-transfers;
+                        font-size: 14px;
+                    }
+                    Text {
+                        text: "Status: " + root.server-status;
+                        font-size: 14px;
+                    }
+                    Text {
+                        text: "Bind: " + root.bind-address + ":" + root.port;
+                        font-size: 12px;
+                        color: #888;
+                    }
+                    Text {
+                        text: "Output: " + root.output-dir;
+                        font-size: 12px;
+                        color: #888;
+                    }
+                }
+            }
+
+            Tab {
+                title: "Log";
+                VerticalBox {
+                    Text {
+                        text: root.log-text;
+                        font-size: 12px;
+                    }
+                }
+            }
+
+            Tab {
+                title: "Config";
+                VerticalBox {
+                    spacing: 8px;
+                    padding: 8px;
+
+                    GridLayout {
+                        spacing: 6px;
+
+                        Row {
+                            Text { text: "Bind Address:"; vertical-alignment: center; }
+                            LineEdit {
+                                text <=> root.bind-address;
+                                enabled: !root.server-running;
+                            }
+                        }
+                        Row {
+                            Text { text: "Port:"; vertical-alignment: center; }
+                            LineEdit {
+                                text <=> root.port;
+                                enabled: !root.server-running;
+                            }
+                        }
+                        Row {
+                            Text { text: "Output Dir:"; vertical-alignment: center; }
+                            LineEdit {
+                                text <=> root.output-dir;
+                                enabled: !root.server-running;
+                            }
+                        }
+                        Row {
+                            Text { text: "TLS Cert:"; vertical-alignment: center; }
+                            LineEdit {
+                                text <=> root.cert-path;
+                                enabled: !root.server-running;
+                            }
+                        }
+                        Row {
+                            Text { text: "TLS Key:"; vertical-alignment: center; }
+                            LineEdit {
+                                text <=> root.key-path;
+                                enabled: !root.server-running;
+                            }
+                        }
+                        Row {
+                            Text { text: "Max Parallel:"; vertical-alignment: center; }
+                            ComboBox {
+                                model: ["25", "50", "100", "200"];
+                                current-value <=> root.max-parallel;
+                                enabled: !root.server-running;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    callback start-stop-server();
+}

@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "bee-sync-gui"]
+resolver = "3"
+
 [package]
 name = "bee-sync"
 version = "0.1.0"

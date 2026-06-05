@@ -1,0 +1,15 @@
+[package]
+name = "bee-sync-gui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bee-sync = { path = ".." }
+slint = "1"
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+fern = "0.7"
+rustls = "0.23.40"
+
+[build-dependencies]
+slint-build = "1"

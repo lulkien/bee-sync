@@ -1,32 +1,16 @@
-//! bee-sync - Rust implementation of a file transfer system
-//!
-//! Architecture:
-//! - Control channel: single TCP/TLS connection for handshake (port 19999)
-//! - Data channels: Data ports 45000-46000 allocated per chunk (parallel transfer)
-//! - Resume: server tracks received chunks, client queries before sending
-
-mod cli;
-mod client;
-mod file_ops;
-mod protocol;
-mod server;
-mod utils;
-
 use clap::Parser;
 use fern::Dispatch;
 use log::{LevelFilter, error, info};
 use std::{fs, io, process};
 
-use crate::{
+use bee_sync::{
+    ClientConfig, ServerConfig,
     cli::{Cli, Commands},
-    client::ClientConfig,
-    server::ServerConfig,
+    client, server, utils,
 };
 
 #[tokio::main]
 async fn main() {
-    // Install default CryptoProvider before any TLS operations.
-    // Required when both ring and aws-lc-rs features are compiled in.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let cli = Cli::parse();
@@ -41,7 +25,6 @@ async fn main() {
     process::exit(result);
 }
 
-/// Initialize logging with specified verbosity level
 fn init_logging(verbose: bool) {
     let level = if verbose {
         LevelFilter::Debug
@@ -57,7 +40,7 @@ fn init_logging(verbose: bool) {
         .ok();
 }
 
-async fn run_server(args: cli::ServerArgs) -> i32 {
+async fn run_server(args: bee_sync::cli::ServerArgs) -> i32 {
     let (bind_host, port) = match utils::parse_address(&args.address) {
         Ok((h, p)) => (h, p),
         Err(e) => {
@@ -94,7 +77,7 @@ async fn run_server(args: cli::ServerArgs) -> i32 {
     }
 }
 
-async fn run_client(args: cli::ClientArgs) -> i32 {
+async fn run_client(args: bee_sync::cli::ClientArgs) -> i32 {
     let filepath = match (args.file, args.url) {
         (Some(f), None) => f,
         (None, Some(url)) => match utils::download_file(&url, &args.temp_dir, args.verbose).await {
@@ -109,7 +92,6 @@ async fn run_client(args: cli::ClientArgs) -> i32 {
             return 1;
         }
         (Some(_), Some(_)) => {
-            // clap enforces mutual exclusion, but be defensive
             eprintln!("Error: --file and --url are mutually exclusive");
             return 1;
         }
@@ -144,7 +126,7 @@ async fn run_client(args: cli::ClientArgs) -> i32 {
         let size_str = args
             .chunk_size
             .as_deref()
-            .unwrap_or(crate::client::DEFAULT_CHUNK_SIZE);
+            .unwrap_or(bee_sync::DEFAULT_CHUNK_SIZE);
         match utils::parse_chunk_size(size_str) {
             Ok(s) => s,
             Err(e) => {
@@ -174,6 +156,5 @@ async fn run_client(args: cli::ClientArgs) -> i32 {
         verbose: args.verbose,
     };
 
-    // run_client handles its own outcome + elapsed logging
     client::run_client(config).await
 }
