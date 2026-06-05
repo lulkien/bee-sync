@@ -173,7 +173,9 @@ export component AppWindow inherits Window {
 
         // ── Transfer list (scrollable) ──
         ScrollView {
+            horizontal-stretch: 1;
             for transfer in root.transfers: VerticalBox {
+                horizontal-stretch: 1;
                 spacing: 2px;
                 padding: 4px;
 
