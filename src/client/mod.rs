@@ -11,7 +11,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Result, anyhow};
@@ -37,6 +37,18 @@ pub const DEFAULT_PARALLEL: usize = 25;
 
 /// Default retries per chunk
 pub const DEFAULT_RETRIES: usize = 3;
+
+/// Format duration as "Xm Ys" when >= 60s, otherwise "X.YZs"
+fn format_elapsed(d: Duration) -> String {
+    let total = d.as_secs();
+    if total >= 60 {
+        let mins = total / 60;
+        let secs = total % 60;
+        format!("{}m {}s", mins, secs)
+    } else {
+        format!("{:.2}s", d.as_secs_f64())
+    }
+}
 
 #[derive(Clone)]
 pub struct ClientConfig {
@@ -91,6 +103,26 @@ pub async fn run_client(config: ClientConfig) -> i32 {
         let (worker_assignments, shutdown_flag, progress_bar) =
             setup_workers(&config, num_chunks, &data_ports, file_size);
 
+        if data_ports.is_empty() {
+            // Resume: all chunks already on server — skip transfer, wait for confirmation
+            info!("All chunks already on server, waiting for confirmation...");
+
+            break match recv_final_status(&mut control_sock, file_size).await {
+                Ok(true) => {
+                    info!("Server confirmed transfer complete");
+                    0
+                }
+                Ok(false) => {
+                    error!("Server reported transfer failure");
+                    1
+                }
+                Err(e) => {
+                    error!("Failed to receive server confirmation: {}", e);
+                    1
+                }
+            };
+        }
+
         // Run workers
         let shutdown_check = shutdown_flag.clone();
         let all_failed = run_workers(
@@ -137,10 +169,11 @@ pub async fn run_client(config: ClientConfig) -> i32 {
     };
 
     let elapsed = started.elapsed();
+    let elapsed_str = format_elapsed(elapsed);
     if interrupted {
-        info!("Transfer interrupted after {:.2}s", elapsed.as_secs_f64());
+        info!("Transfer interrupted after {}", elapsed_str);
     } else {
-        info!("Transfer completed in {:.2}s", elapsed.as_secs_f64());
+        info!("Transfer completed in {}", elapsed_str);
     }
 
     exit_code
@@ -370,12 +403,18 @@ fn setup_workers(
     Arc<Mutex<indicatif::ProgressBar>>,
 ) {
     // Distribute chunks across workers (round-robin)
-    let num_workers = std::cmp::min(config.parallel, data_ports.len());
-    let mut worker_assignments: Vec<Vec<usize>> = vec![Vec::new(); num_workers];
+    let num_workers = if data_ports.is_empty() {
+        0
+    } else {
+        std::cmp::min(config.parallel, data_ports.len())
+    };
+    let mut worker_assignments: Vec<Vec<usize>> = vec![Vec::new(); num_workers.max(1)];
 
-    for i in 0..num_chunks {
-        let worker_idx = i % num_workers;
-        worker_assignments[worker_idx].push(i);
+    if num_workers > 0 {
+        for i in 0..num_chunks {
+            let worker_idx = i % num_workers;
+            worker_assignments[worker_idx].push(i);
+        }
     }
 
     // Progress tracking

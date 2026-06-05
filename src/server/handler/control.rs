@@ -87,7 +87,11 @@ pub async fn handle_control_connection(
 
     info!(
         "[{}] Handshake: {} ({} bytes, {} chunks of {} bytes)",
-        client_addr, handshake.safe_name, handshake.file_size, handshake.num_chunks, handshake.chunk_size
+        client_addr,
+        handshake.safe_name,
+        handshake.file_size,
+        handshake.num_chunks,
+        handshake.chunk_size
     );
 
     // Check if file already exists and matches
@@ -111,6 +115,70 @@ pub async fn handle_control_connection(
         return Ok(());
     }
 
+    // Create receiver first so we can check for existing metadata
+    // before deciding whether to allocate data ports
+    let receiver = create_receiver(
+        handshake.safe_name.clone(),
+        handshake.file_size,
+        handshake.chunk_size,
+        handshake.num_chunks,
+        handshake.full_hash,
+        output_dir.to_string(),
+        temp_dir.to_string(),
+    );
+
+    // Load metadata from previous transfer and validate existing .part files
+    let all_chunks_present = {
+        let mut recv = receiver.lock().unwrap();
+        if let Some(meta) = recv.load_or_purge_metadata() {
+            for &idx in meta.chunk_hashes.keys() {
+                recv.received_chunks[idx] = true;
+            }
+            recv.metadata = meta;
+            let count = recv.received_chunks.iter().filter(|&&c| c).count();
+            if count > 0 {
+                info!(
+                    "Resuming transfer: {}/{} chunks already valid",
+                    count, recv.num_chunks
+                );
+            }
+            count == recv.num_chunks
+        } else {
+            false
+        }
+    };
+
+    if all_chunks_present {
+        // All chunks already valid — no data ports needed.
+        // Send empty port list, assemble immediately, send final status.
+        send_handshake_response(&mut stream, handshake::RESP_OK, &[]).await?;
+
+        let success = match assemble_file(&receiver) {
+            Ok(true) => {
+                info!(
+                    "[{}] Transfer complete: {} ({} bytes, {} chunks)",
+                    client_addr, handshake.filename, handshake.file_size, handshake.num_chunks
+                );
+                true
+            }
+            Ok(false) | Err(_) => {
+                error!(
+                    "[{}] Transfer failed: {} ({} bytes, {} chunks)",
+                    client_addr, handshake.filename, handshake.file_size, handshake.num_chunks
+                );
+                false
+            }
+        };
+
+        let final_status = if success {
+            handshake::RESP_OK
+        } else {
+            handshake::RESP_ERR
+        };
+        let _ = frame::send_timeout(&mut stream, &[final_status]).await;
+        return Ok(());
+    }
+
     // Allocate data ports for parallel transfer
     let data_socks = match allocate_sockets(handshake.num_chunks, max_parallel).await {
         Ok(sockets) => sockets,
@@ -123,36 +191,10 @@ pub async fn handle_control_connection(
 
     let ports = sockets_to_ports(&data_socks);
 
-    // Create receiver and register for each data port
-    let receiver = create_receiver(
-        handshake.safe_name,
-        handshake.file_size,
-        handshake.chunk_size,
-        handshake.num_chunks,
-        handshake.full_hash,
-        output_dir.to_string(),
-        temp_dir.to_string(),
-    );
-
     register_receivers(&data_socks, receiver.clone());
 
     // Send handshake response with data ports
     send_handshake_response(&mut stream, handshake::RESP_OK, &ports).await?;
-
-    // Load metadata from previous transfer and validate existing .part files
-    {
-        let mut recv = receiver.lock().unwrap();
-        if let Some(meta) = recv.load_or_purge_metadata() {
-            for &idx in meta.chunk_hashes.keys() {
-                recv.received_chunks[idx] = true;
-            }
-            recv.metadata = meta;
-            let count = recv.received_chunks.iter().filter(|&&c| c).count();
-            if count > 0 {
-                info!("Resuming transfer: {}/{} chunks already valid", count, recv.num_chunks);
-            }
-        }
-    }
 
     // Spawn data server tasks
     let data_tasks = spawn_data_servers(data_socks, receiver.clone()).await;
@@ -189,7 +231,6 @@ pub async fn handle_control_connection(
     match frame::send_timeout(&mut stream, &[final_status]).await {
         Ok(()) => {}
         Err(e) => {
-            // Broken pipe is expected when the client already disconnected
             if e.to_string().contains("Broken pipe") {
                 debug!("Client disconnected before final status");
             } else {
@@ -210,13 +251,6 @@ pub async fn handle_control_connection(
             client_addr, handshake.filename, handshake.file_size, handshake.num_chunks
         );
     }
-
-    // Brief grace period: let client workers connect and query before we
-    // tear down receivers. Without this, a resume where all chunks are
-    // already present causes a race — the server assembles and cleans up
-    // before the client's workers can connect, producing spurious
-    // "Connection reset" errors on the client side.
-    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Cleanup
     cleanup(&ports, data_tasks);

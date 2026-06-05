@@ -85,7 +85,7 @@ impl FileReceiver {
     pub fn load_or_purge_metadata(&self) -> Option<TransferMetadata> {
         let meta = match TransferMetadata::load(&self.parts_dir, &self.filename) {
             Ok(Some(m)) => m,
-            Ok(None) => return None,   // no previous transfer
+            Ok(None) => return None, // no previous transfer
             Err(e) => {
                 log::warn!("Failed to load metadata: {}, purging", e);
                 TransferMetadata::purge(&self.parts_dir, &self.filename, self.num_chunks);
@@ -102,8 +102,10 @@ impl FileReceiver {
         ) {
             log::info!(
                 "Transfer parameters changed (chunk_size={}→{}, num_chunks={}→{}), purging old parts",
-                meta.chunk_size, self.chunk_size,
-                meta.num_chunks, self.num_chunks,
+                meta.chunk_size,
+                self.chunk_size,
+                meta.num_chunks,
+                self.num_chunks,
             );
             TransferMetadata::purge(&self.parts_dir, &self.filename, self.num_chunks);
             return None;
@@ -196,7 +198,9 @@ impl FileReceiver {
         }
 
         // Clean up metadata on successful assembly
-        if let Err(e) = fs::remove_file(TransferMetadata::meta_path(&self.parts_dir, &self.filename)) {
+        if let Err(e) =
+            fs::remove_file(TransferMetadata::meta_path(&self.parts_dir, &self.filename))
+        {
             log::warn!("Failed to remove metadata file: {}", e);
         }
 

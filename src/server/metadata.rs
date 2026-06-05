@@ -17,11 +17,7 @@
 //! 57      N*36  entries      chunk_index(u32 BE) + chunk_hash(32 bytes)
 //! ```
 
-use std::{
-    collections::HashMap,
-    fs,
-    path::Path,
-};
+use std::{collections::HashMap, fs, path::Path};
 
 use anyhow::{Result, bail};
 
@@ -50,12 +46,7 @@ pub struct TransferMetadata {
 
 impl TransferMetadata {
     /// Create a new empty metadata record for a transfer.
-    pub fn new(
-        chunk_size: usize,
-        num_chunks: usize,
-        file_size: u64,
-        full_hash: [u8; 32],
-    ) -> Self {
+    pub fn new(chunk_size: usize, num_chunks: usize, file_size: u64, full_hash: [u8; 32]) -> Self {
         Self {
             chunk_size,
             num_chunks,
