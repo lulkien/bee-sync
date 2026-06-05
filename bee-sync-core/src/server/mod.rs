@@ -61,9 +61,10 @@ pub struct ServerConfig {
     pub certfile: Option<String>,
     pub keyfile: Option<String>,
     pub max_parallel: usize,
-    /// Optional external shutdown signal (e.g. from GUI Stop button).
-    /// When set, the server stops when both this and Ctrl+C are checked.
-    pub shutdown: Option<Arc<AtomicBool>>,
+    /// External shutdown signal. The server checks this in its accept loop
+    /// and stops gracefully when set. The caller (CLI or GUI) controls when
+    /// to trigger shutdown (e.g. via ctrlc or a Stop button).
+    pub shutdown: Arc<AtomicBool>,
 }
 
 /// Data port range for parallel chunk transfer
@@ -169,30 +170,11 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
 
     info!("Listening on {}:{}", config.bind_host, config.port);
 
-    // Graceful shutdown on Ctrl+C
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let shutdown_clone = shutdown.clone();
-    ctrlc::set_handler(move || {
-        if !shutdown_clone.swap(true, Ordering::SeqCst) {
-            info!("Shutting down server...");
-        }
-    })
-    .ok();
-
-    // Combine external shutdown signal (e.g. GUI Stop button) with ctrlc
-    let external_shutdown = config.shutdown.clone();
-
-    let is_shutdown = || -> bool {
-        shutdown.load(Ordering::SeqCst)
-            || external_shutdown
-                .as_ref()
-                .is_some_and(|s| s.load(Ordering::SeqCst))
-    };
-
     let output_dir = config.output_dir.clone();
     let temp_dir = config.temp_dir.clone();
     let max_parallel = config.max_parallel;
     let conn_semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
+    let shutdown = config.shutdown.clone();
 
     loop {
         tokio::select! {
@@ -254,7 +236,7 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
                 });
             }
             _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                if is_shutdown() {
+                if shutdown.load(Ordering::SeqCst) {
                     info!("Server shutting down");
                     break Ok(());
                 }

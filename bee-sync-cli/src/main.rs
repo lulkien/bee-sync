@@ -1,3 +1,8 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 use clap::Parser;
 use fern::Dispatch;
 use log::{LevelFilter, error, info};
@@ -55,6 +60,15 @@ async fn run_server(args: bee_sync_core::cli::ServerArgs) -> i32 {
     info!("Output directory: {}", args.output_dir);
     info!("Temp directory: {}", temp_dir);
 
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_clone = shutdown.clone();
+    ctrlc::set_handler(move || {
+        if !shutdown_clone.swap(true, Ordering::SeqCst) {
+            info!("Shutting down server...");
+        }
+    })
+    .ok();
+
     let config = ServerConfig {
         bind_host,
         port,
@@ -63,7 +77,7 @@ async fn run_server(args: bee_sync_core::cli::ServerArgs) -> i32 {
         certfile: args.cert,
         keyfile: args.key,
         max_parallel: args.max_parallel,
-        shutdown: None,
+        shutdown,
     };
 
     match server::run_server(config).await {

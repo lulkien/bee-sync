@@ -108,7 +108,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                         certfile: cert_opt,
                         keyfile: key_opt,
                         max_parallel: 100,
-                        shutdown: Some(flag),
+                        shutdown: flag,
                     };
 
                     match run_server(config).await {
