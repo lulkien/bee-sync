@@ -1,5 +1,5 @@
 use std::sync::{
-    Arc, Mutex,
+    Arc,
     atomic::{AtomicBool, Ordering},
 };
 
@@ -123,19 +123,18 @@ async fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // Start/Stop callback with shared shutdown signal
-    let shutdown_flag: Arc<Mutex<Option<Arc<AtomicBool>>>> = Arc::new(Mutex::new(None));
+    // Start/Stop callback — single persistent shutdown flag
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
     {
         let ui_handle = ui.as_weak();
-        let shutdown_ref = shutdown_flag.clone();
+        let shutdown = shutdown_flag.clone();
 
         ui.on_start_stop_server(move || {
             let ui = ui_handle.unwrap();
 
             if ui.get_server_running() {
-                if let Some(flag) = shutdown_ref.lock().unwrap().as_ref() {
-                    flag.store(true, Ordering::SeqCst);
-                }
+                // Stop: set the persistent shutdown flag
+                shutdown.store(true, Ordering::SeqCst);
                 ui.set_server_running(false);
                 ui.set_server_status("Stopping...".into());
             } else {
@@ -153,15 +152,15 @@ async fn main() -> Result<(), slint::PlatformError> {
                     ui.get_temp_dir().to_string()
                 };
 
-                let flag = Arc::new(AtomicBool::new(false));
-                *shutdown_ref.lock().unwrap() = Some(flag.clone());
+                // Reset shutdown for new server run
+                shutdown.store(false, Ordering::SeqCst);
 
                 ui.set_server_running(true);
                 ui.set_server_status("Running".into());
 
                 let ui_weak = ui.as_weak();
-                let shutdown_ref2 = shutdown_ref.clone();
                 let tx = event_tx.clone();
+                let shutdown = shutdown.clone();
                 tokio::spawn(async move {
                     let config = ServerConfig {
                         bind_host: bind_addr,
@@ -171,7 +170,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                         certfile: cert_opt,
                         keyfile: key_opt,
                         max_parallel: 100,
-                        shutdown: flag,
+                        shutdown,
                         event_sender: Some(tx),
                     };
 
@@ -182,11 +181,12 @@ async fn main() -> Result<(), slint::PlatformError> {
                         }
                     }
 
-                    *shutdown_ref2.lock().unwrap() = None;
-
-                    let ui = ui_weak.unwrap();
-                    ui.set_server_running(false);
-                    ui.set_server_status("Stopped".into());
+                    // Update UI from the event loop thread
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let Some(ui) = ui_weak.upgrade() else { return };
+                        ui.set_server_running(false);
+                        ui.set_server_status("Stopped".into());
+                    });
                 });
             }
         });
