@@ -1,3 +1,8 @@
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
+
 use bee_sync_core::server::{ServerConfig, run_server};
 use rfd::FileDialog;
 use slint::ComponentHandle;
@@ -54,17 +59,22 @@ async fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // Start/Stop callback
+    // Start/Stop callback with shared shutdown signal
+    let shutdown_flag: Arc<Mutex<Option<Arc<AtomicBool>>>> = Arc::new(Mutex::new(None));
     {
         let ui_handle = ui.as_weak();
+        let shutdown_ref = shutdown_flag.clone();
 
         ui.on_start_stop_server(move || {
             let ui = ui_handle.unwrap();
 
             if ui.get_server_running() {
+                // Stop: set the shutdown flag
+                if let Some(flag) = shutdown_ref.lock().unwrap().as_ref() {
+                    flag.store(true, Ordering::SeqCst);
+                }
                 ui.set_server_running(false);
                 ui.set_server_status("Stopping...".into());
-                // TODO: send shutdown signal
             } else {
                 let bind_addr = ui.get_bind_address().to_string();
                 let port: u16 = ui.get_port().parse().unwrap_or(19999);
@@ -80,10 +90,15 @@ async fn main() -> Result<(), slint::PlatformError> {
                     ui.get_temp_dir().to_string()
                 };
 
+                // Create fresh shutdown signal for this server run
+                let flag = Arc::new(AtomicBool::new(false));
+                *shutdown_ref.lock().unwrap() = Some(flag.clone());
+
                 ui.set_server_running(true);
                 ui.set_server_status("Running".into());
 
                 let ui_weak = ui.as_weak();
+                let shutdown_ref2 = shutdown_ref.clone();
                 tokio::spawn(async move {
                     let config = ServerConfig {
                         bind_host: bind_addr,
@@ -93,6 +108,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                         certfile: cert_opt,
                         keyfile: key_opt,
                         max_parallel: 100,
+                        shutdown: Some(flag),
                     };
 
                     match run_server(config).await {
@@ -101,6 +117,9 @@ async fn main() -> Result<(), slint::PlatformError> {
                             eprintln!("Server error: {}", e);
                         }
                     }
+
+                    // Clear the stored flag on exit
+                    *shutdown_ref2.lock().unwrap() = None;
 
                     let ui = ui_weak.unwrap();
                     ui.set_server_running(false);

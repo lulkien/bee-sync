@@ -61,6 +61,9 @@ pub struct ServerConfig {
     pub certfile: Option<String>,
     pub keyfile: Option<String>,
     pub max_parallel: usize,
+    /// Optional external shutdown signal (e.g. from GUI Stop button).
+    /// When set, the server stops when both this and Ctrl+C are checked.
+    pub shutdown: Option<Arc<AtomicBool>>,
 }
 
 /// Data port range for parallel chunk transfer
@@ -176,6 +179,16 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
     })
     .ok();
 
+    // Combine external shutdown signal (e.g. GUI Stop button) with ctrlc
+    let external_shutdown = config.shutdown.clone();
+
+    let is_shutdown = || -> bool {
+        shutdown.load(Ordering::SeqCst)
+            || external_shutdown
+                .as_ref()
+                .is_some_and(|s| s.load(Ordering::SeqCst))
+    };
+
     let output_dir = config.output_dir.clone();
     let temp_dir = config.temp_dir.clone();
     let max_parallel = config.max_parallel;
@@ -241,7 +254,7 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
                 });
             }
             _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                if shutdown.load(Ordering::SeqCst) {
+                if is_shutdown() {
                     info!("Server shutting down");
                     break Ok(());
                 }

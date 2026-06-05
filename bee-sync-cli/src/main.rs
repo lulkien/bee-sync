@@ -63,6 +63,7 @@ async fn run_server(args: bee_sync_core::cli::ServerArgs) -> i32 {
         certfile: args.cert,
         keyfile: args.key,
         max_parallel: args.max_parallel,
+        shutdown: None,
     };
 
     match server::run_server(config).await {
