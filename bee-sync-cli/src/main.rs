@@ -78,6 +78,7 @@ async fn run_server(args: bee_sync_core::cli::ServerArgs) -> i32 {
         keyfile: args.key,
         max_parallel: args.max_parallel,
         shutdown,
+        event_sender: None,
     };
 
     match server::run_server(config).await {

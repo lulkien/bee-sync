@@ -3,9 +3,10 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use bee_sync_core::server::{ServerConfig, run_server};
+use bee_sync_core::server::{ServerConfig, TransferEvent, run_server};
 use rfd::FileDialog;
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model, VecModel};
+use tokio::sync::mpsc;
 
 slint::include_modules!();
 
@@ -14,6 +15,69 @@ async fn main() -> Result<(), slint::PlatformError> {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let ui = AppWindow::new()?;
+
+    // Event channel: server → GUI
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<TransferEvent>();
+
+    // Transfer model for the UI list
+    let transfers = std::rc::Rc::new(VecModel::<TransferData>::default());
+    ui.set_transfers(transfers.clone().into());
+
+    // Spawn event receiver — forwards server events to the transfer model
+    {
+        let ui_handle = ui.as_weak();
+        tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                let ui = ui_handle.clone();
+
+                // Extract fields before moving into the UI closure
+                let client_addr = event.client_addr.clone();
+                let filename = event.filename.clone();
+                let progress = event.progress();
+                let complete = event.complete;
+
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = ui.upgrade() else { return };
+
+                    let model = ui.get_transfers();
+                    let Some(transfers) = model.as_any().downcast_ref::<VecModel<TransferData>>()
+                    else {
+                        return;
+                    };
+
+                    if complete {
+                        let row = (0..transfers.row_count()).position(|i| {
+                            transfers.row_data(i).unwrap().client_info == client_addr.as_str()
+                        });
+                        if let Some(idx) = row {
+                            transfers.remove(idx);
+                        }
+                    } else {
+                        let existing = (0..transfers.row_count()).position(|i| {
+                            transfers.row_data(i).unwrap().client_info.as_str()
+                                == client_addr.as_str()
+                        });
+                        if existing.is_none() {
+                            transfers.push(TransferData {
+                                client_info: format!("{} — {}", client_addr, filename).into(),
+                                filename: filename.into(),
+                                progress,
+                            });
+                        } else if let Some(i) = existing {
+                            transfers.set_row_data(
+                                i,
+                                TransferData {
+                                    client_info: format!("{} — {}", client_addr, filename).into(),
+                                    filename: filename.into(),
+                                    progress,
+                                },
+                            );
+                        }
+                    }
+                });
+            }
+        });
+    }
 
     // File dialog callbacks
     {
@@ -69,7 +133,6 @@ async fn main() -> Result<(), slint::PlatformError> {
             let ui = ui_handle.unwrap();
 
             if ui.get_server_running() {
-                // Stop: set the shutdown flag
                 if let Some(flag) = shutdown_ref.lock().unwrap().as_ref() {
                     flag.store(true, Ordering::SeqCst);
                 }
@@ -90,7 +153,6 @@ async fn main() -> Result<(), slint::PlatformError> {
                     ui.get_temp_dir().to_string()
                 };
 
-                // Create fresh shutdown signal for this server run
                 let flag = Arc::new(AtomicBool::new(false));
                 *shutdown_ref.lock().unwrap() = Some(flag.clone());
 
@@ -99,6 +161,7 @@ async fn main() -> Result<(), slint::PlatformError> {
 
                 let ui_weak = ui.as_weak();
                 let shutdown_ref2 = shutdown_ref.clone();
+                let tx = event_tx.clone();
                 tokio::spawn(async move {
                     let config = ServerConfig {
                         bind_host: bind_addr,
@@ -109,6 +172,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                         keyfile: key_opt,
                         max_parallel: 100,
                         shutdown: flag,
+                        event_sender: Some(tx),
                     };
 
                     match run_server(config).await {
@@ -118,7 +182,6 @@ async fn main() -> Result<(), slint::PlatformError> {
                         }
                     }
 
-                    // Clear the stored flag on exit
                     *shutdown_ref2.lock().unwrap() = None;
 
                     let ui = ui_weak.unwrap();

@@ -15,6 +15,7 @@ use log::{debug, error, info};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpListener,
+    sync::mpsc,
     task::JoinHandle,
 };
 
@@ -25,8 +26,8 @@ use crate::{
 
 use super::{
     super::{
-        DATA_PORT_END, DATA_PORT_START, FileReceiver, TOTAL_DATA_PORTS, register_receivers,
-        release_ports, remove_receiver, try_reserve_ports,
+        DATA_PORT_END, DATA_PORT_START, FileReceiver, TOTAL_DATA_PORTS, TransferEvent,
+        register_receivers, release_ports, remove_receiver, try_reserve_ports,
     },
     handle_data_connection,
 };
@@ -60,6 +61,7 @@ pub async fn handle_control_connection(
     output_dir: &str,
     temp_dir: &str,
     max_parallel: usize,
+    event_sender: Option<mpsc::UnboundedSender<TransferEvent>>,
 ) -> Result<()> {
     // Receive handshake frame
     let data = match frame::recv_timeout(&mut stream).await {
@@ -93,6 +95,17 @@ pub async fn handle_control_connection(
         handshake.num_chunks,
         handshake.chunk_size
     );
+
+    // Notify GUI of new transfer
+    if let Some(ref sender) = event_sender {
+        let _ = sender.send(TransferEvent {
+            client_addr: client_addr.to_string(),
+            filename: handshake.safe_name.clone(),
+            bytes_total: handshake.file_size,
+            bytes_received: 0,
+            complete: false,
+        });
+    }
 
     // Check if file already exists and matches
     if check_existing_file(output_dir, &handshake.safe_name, &handshake.full_hash)? {
@@ -159,6 +172,15 @@ pub async fn handle_control_connection(
                     "[{}] Transfer complete: {} ({} bytes, {} chunks)",
                     client_addr, handshake.filename, handshake.file_size, handshake.num_chunks
                 );
+                if let Some(ref sender) = event_sender {
+                    let _ = sender.send(TransferEvent {
+                        client_addr: client_addr.to_string(),
+                        filename: handshake.safe_name.clone(),
+                        bytes_total: handshake.file_size,
+                        bytes_received: handshake.file_size,
+                        complete: true,
+                    });
+                }
                 true
             }
             Ok(false) | Err(_) => {
@@ -166,6 +188,15 @@ pub async fn handle_control_connection(
                     "[{}] Transfer failed: {} (corrupt chunks detected — re-run client to resend)",
                     client_addr, handshake.filename
                 );
+                if let Some(ref sender) = event_sender {
+                    let _ = sender.send(TransferEvent {
+                        client_addr: client_addr.to_string(),
+                        filename: handshake.safe_name.clone(),
+                        bytes_total: handshake.file_size,
+                        bytes_received: 0,
+                        complete: true,
+                    });
+                }
                 false
             }
         };

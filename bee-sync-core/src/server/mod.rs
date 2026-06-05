@@ -34,7 +34,28 @@ use log::{error, info};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
+use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
+
+/// Event emitted to GUI for transfer progress tracking
+#[derive(Debug, Clone)]
+pub struct TransferEvent {
+    pub client_addr: String,
+    pub filename: String,
+    pub bytes_total: u64,
+    pub bytes_received: u64,
+    pub complete: bool,
+}
+
+impl TransferEvent {
+    pub fn progress(&self) -> f32 {
+        if self.bytes_total == 0 {
+            0.0
+        } else {
+            (self.bytes_received as f32 / self.bytes_total as f32).clamp(0.0, 1.0)
+        }
+    }
+}
 
 mod file_receiver;
 mod handler;
@@ -63,8 +84,10 @@ pub struct ServerConfig {
     pub max_parallel: usize,
     /// External shutdown signal. The server checks this in its accept loop
     /// and stops gracefully when set. The caller (CLI or GUI) controls when
-    /// to trigger shutdown (e.g. via ctrlc or a Stop button).
+    /// External shutdown signal.
     pub shutdown: Arc<AtomicBool>,
+    /// Optional sender for transfer progress events (GUI only).
+    pub event_sender: Option<mpsc::UnboundedSender<TransferEvent>>,
 }
 
 /// Data port range for parallel chunk transfer
@@ -175,6 +198,7 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
     let max_parallel = config.max_parallel;
     let conn_semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
     let shutdown = config.shutdown.clone();
+    let event_sender = config.event_sender.clone();
 
     loop {
         tokio::select! {
@@ -191,6 +215,7 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
                 let _tls_ctx = tls_ctx.clone();
                 let output_dir = output_dir.clone();
                 let temp_dir = temp_dir.clone();
+                let event_sender = event_sender.clone();
                 let permit = match conn_semaphore.clone().try_acquire_owned() {
                     Ok(p) => p,
                     Err(_) => {
@@ -211,6 +236,7 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
                                     &output_dir,
                                     &temp_dir,
                                     max_parallel,
+                                    event_sender.clone(),
                                 )
                                 .await
                             }
@@ -226,6 +252,7 @@ pub async fn run_server(config: ServerConfig) -> anyhow::Result<()> {
                             &output_dir,
                             &temp_dir,
                             max_parallel,
+                            event_sender,
                         )
                         .await
                     };
