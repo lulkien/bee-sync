@@ -1,140 +1,200 @@
-import { VerticalBox, HorizontalBox, Button, LineEdit, ComboBox, TabWidget } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, Button, LineEdit, ScrollView, CheckBox } from "std-widgets.slint";
+
+export struct TransferData {
+    client-info: string,
+    filename: string,
+    progress: float,
+}
 
 export component AppWindow inherits Window {
     title: "bee-sync Server";
-    preferred-width: 800px;
-    preferred-height: 600px;
+    preferred-width: 720px;
+    preferred-height: 560px;
 
     // ── Server Config ──
     in-out property<string> bind-address: "0.0.0.0";
     in-out property<string> port: "19999";
     in-out property<string> output-dir: "./received";
+    in-out property<string> temp-dir: "";
+    in-out property<bool> temp-same-as-output: true;
     in-out property<string> cert-path: "";
     in-out property<string> key-path: "";
-    in-out property<string> max-parallel: "100";
 
     // ── Server State ──
     in-out property<bool> server-running: false;
     in-out property<string> server-status: "Stopped";
-    in-out property<int> active-transfers: 0;
 
-    // ── Log ──
-    in-out property<string> log-text: "";
+    // ── Transfer model (set from Rust) ──
+    in-out property<[TransferData]> transfers: [];
 
     VerticalBox {
-        padding: 12px;
-        spacing: 8px;
+        spacing: 4px;
+        padding: 8px;
 
-        // ── Header ──
+        // ── Row 1: Bind address + Port + Start/Stop ──
         HorizontalBox {
-            alignment: center;
+            alignment: start;
+            spacing: 6px;
+
             Text {
-                text: "bee-sync Server";
-                font-size: 22px;
-                font-weight: 700;
+                text: "Bind:";
+                vertical-alignment: center;
+                font-size: 13px;
+            }
+            LineEdit {
+                text <=> root.bind-address;
+                enabled: !root.server-running;
+                horizontal-stretch: 1;
+                preferred-width: 140px;
             }
             Text {
-                text: root.server-status;
-                color: root.server-running ? #22c55e : #ef4444;
-                font-weight: 600;
+                text: ":";
+                vertical-alignment: center;
+                font-size: 13px;
+            }
+            LineEdit {
+                text <=> root.port;
+                enabled: !root.server-running;
+                preferred-width: 70px;
             }
             Button {
                 text: root.server-running ? "Stop" : "Start";
+                preferred-width: 80px;
                 clicked => { root.start-stop-server(); }
             }
         }
 
-        // ── Tabs ──
-        TabWidget {
-            Tab {
-                title: "Dashboard";
-                VerticalBox {
-                    spacing: 8px;
-                    padding: 8px;
+        // ── Row 2: Output dir ──
+        HorizontalBox {
+            alignment: start;
+            spacing: 6px;
 
+            Text {
+                text: "Output:";
+                vertical-alignment: center;
+                font-size: 13px;
+                preferred-width: 50px;
+            }
+            LineEdit {
+                text <=> root.output-dir;
+                enabled: !root.server-running;
+                horizontal-stretch: 1;
+            }
+            Button {
+                text: "Browse...";
+                enabled: !root.server-running;
+                clicked => { root.browse-output-dir(); }
+            }
+        }
+
+        // ── Row 3: Temp dir checkbox ──
+        CheckBox {
+            text: "Use output as temp dir";
+            checked <=> root.temp-same-as-output;
+            enabled: !root.server-running;
+        }
+
+        // ── Row 4: Temp dir ──
+        HorizontalBox {
+            alignment: start;
+            spacing: 6px;
+
+            Text {
+                text: "Temp:";
+                vertical-alignment: center;
+                font-size: 13px;
+                preferred-width: 50px;
+            }
+            LineEdit {
+                text <=> root.temp-dir;
+                enabled: !root.server-running && !root.temp-same-as-output;
+                horizontal-stretch: 1;
+            }
+            Button {
+                text: "Browse...";
+                enabled: !root.server-running && !root.temp-same-as-output;
+                clicked => { root.browse-temp-dir(); }
+            }
+        }
+
+        // ── Row 5: TLS cert ──
+        HorizontalBox {
+            alignment: start;
+            spacing: 6px;
+
+            Text {
+                text: "Cert:";
+                vertical-alignment: center;
+                font-size: 13px;
+                preferred-width: 50px;
+            }
+            LineEdit {
+                text <=> root.cert-path;
+                enabled: !root.server-running;
+                horizontal-stretch: 1;
+            }
+            Button {
+                text: "Browse...";
+                enabled: !root.server-running;
+                clicked => { root.browse-cert(); }
+            }
+        }
+
+        // ── Row 6: TLS key ──
+        HorizontalBox {
+            alignment: start;
+            spacing: 6px;
+
+            Text {
+                text: "Key:";
+                vertical-alignment: center;
+                font-size: 13px;
+                preferred-width: 50px;
+            }
+            LineEdit {
+                text <=> root.key-path;
+                enabled: !root.server-running;
+                horizontal-stretch: 1;
+            }
+            Button {
+                text: "Browse...";
+                enabled: !root.server-running;
+                clicked => { root.browse-key(); }
+            }
+        }
+
+        // ── Separator ──
+        Text {
+            text: "Active Transfers";
+            font-size: 14px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+
+        // ── Transfer list (scrollable) ──
+        ScrollView {
+            for transfer in root.transfers: VerticalBox {
+                spacing: 2px;
+                padding: 4px;
+
+                HorizontalBox {
                     Text {
-                        text: "Active Transfers: " + root.active-transfers;
-                        font-size: 14px;
-                    }
-                    Text {
-                        text: "Status: " + root.server-status;
-                        font-size: 14px;
-                    }
-                    Text {
-                        text: "Bind: " + root.bind-address + ":" + root.port;
+                        text: transfer.client-info;
                         font-size: 12px;
-                        color: #888;
                     }
                     Text {
-                        text: "Output: " + root.output-dir;
+                        text: transfer.filename;
                         font-size: 12px;
-                        color: #888;
+                        font-weight: 600;
                     }
                 }
-            }
-
-            Tab {
-                title: "Log";
-                VerticalBox {
-                    Text {
-                        text: root.log-text;
-                        font-size: 12px;
-                    }
-                }
-            }
-
-            Tab {
-                title: "Config";
-                VerticalBox {
-                    spacing: 8px;
-                    padding: 8px;
-
-                    GridLayout {
-                        spacing: 6px;
-
-                        Row {
-                            Text { text: "Bind Address:"; vertical-alignment: center; }
-                            LineEdit {
-                                text <=> root.bind-address;
-                                enabled: !root.server-running;
-                            }
-                        }
-                        Row {
-                            Text { text: "Port:"; vertical-alignment: center; }
-                            LineEdit {
-                                text <=> root.port;
-                                enabled: !root.server-running;
-                            }
-                        }
-                        Row {
-                            Text { text: "Output Dir:"; vertical-alignment: center; }
-                            LineEdit {
-                                text <=> root.output-dir;
-                                enabled: !root.server-running;
-                            }
-                        }
-                        Row {
-                            Text { text: "TLS Cert:"; vertical-alignment: center; }
-                            LineEdit {
-                                text <=> root.cert-path;
-                                enabled: !root.server-running;
-                            }
-                        }
-                        Row {
-                            Text { text: "TLS Key:"; vertical-alignment: center; }
-                            LineEdit {
-                                text <=> root.key-path;
-                                enabled: !root.server-running;
-                            }
-                        }
-                        Row {
-                            Text { text: "Max Parallel:"; vertical-alignment: center; }
-                            ComboBox {
-                                model: ["25", "50", "100", "200"];
-                                current-value <=> root.max-parallel;
-                                enabled: !root.server-running;
-                            }
-                        }
+                Rectangle {
+                    height: 6px;
+                    clip: true;
+                    Rectangle {
+                        background: #22c55e;
+                        width: parent.width * transfer.progress;
+                        height: 6px;
                     }
                 }
             }
@@ -142,4 +202,8 @@ export component AppWindow inherits Window {
     }
 
     callback start-stop-server();
+    callback browse-output-dir();
+    callback browse-temp-dir();
+    callback browse-cert();
+    callback browse-key();
 }

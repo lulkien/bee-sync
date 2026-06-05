@@ -1,40 +1,65 @@
-use std::sync::{Arc, Mutex};
-
 use bee_sync_core::server::{ServerConfig, run_server};
+use rfd::FileDialog;
 use slint::ComponentHandle;
 
 slint::include_modules!();
-
-struct AppState {
-    log_lines: Vec<String>,
-}
-
-impl AppState {
-    fn push_log(&mut self, msg: &str) {
-        self.log_lines.push(msg.to_string());
-        if self.log_lines.len() > 1000 {
-            self.log_lines.remove(0);
-        }
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), slint::PlatformError> {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let ui = AppWindow::new()?;
-    let state = Arc::new(Mutex::new(AppState {
-        log_lines: Vec::new(),
-    }));
+
+    // File dialog callbacks
+    {
+        let ui_handle = ui.as_weak();
+        ui.on_browse_output_dir(move || {
+            let ui = ui_handle.unwrap();
+            if let Some(path) = FileDialog::new().pick_folder() {
+                ui.set_output_dir(path.to_string_lossy().to_string().into());
+            }
+        });
+    }
+    {
+        let ui_handle = ui.as_weak();
+        ui.on_browse_temp_dir(move || {
+            let ui = ui_handle.unwrap();
+            if let Some(path) = FileDialog::new().pick_folder() {
+                ui.set_temp_dir(path.to_string_lossy().to_string().into());
+            }
+        });
+    }
+    {
+        let ui_handle = ui.as_weak();
+        ui.on_browse_cert(move || {
+            let ui = ui_handle.unwrap();
+            if let Some(path) = FileDialog::new()
+                .add_filter("Certificates", &["pem", "crt", "cer"])
+                .pick_file()
+            {
+                ui.set_cert_path(path.to_string_lossy().to_string().into());
+            }
+        });
+    }
+    {
+        let ui_handle = ui.as_weak();
+        ui.on_browse_key(move || {
+            let ui = ui_handle.unwrap();
+            if let Some(path) = FileDialog::new()
+                .add_filter("Keys", &["pem", "key"])
+                .pick_file()
+            {
+                ui.set_key_path(path.to_string_lossy().to_string().into());
+            }
+        });
+    }
 
     // Start/Stop callback
     {
         let ui_handle = ui.as_weak();
-        let state_rc = state.clone();
 
         ui.on_start_stop_server(move || {
             let ui = ui_handle.unwrap();
-            let state = state_rc.clone();
 
             if ui.get_server_running() {
                 ui.set_server_running(false);
@@ -42,15 +67,18 @@ async fn main() -> Result<(), slint::PlatformError> {
                 // TODO: send shutdown signal
             } else {
                 let bind_addr = ui.get_bind_address().to_string();
-                let port_str = ui.get_port().to_string();
+                let port: u16 = ui.get_port().parse().unwrap_or(19999);
                 let output_dir = ui.get_output_dir().to_string();
                 let cert = ui.get_cert_path().to_string();
                 let key = ui.get_key_path().to_string();
                 let cert_opt = if cert.is_empty() { None } else { Some(cert) };
                 let key_opt = if key.is_empty() { None } else { Some(key) };
-                let max_parallel: usize = ui.get_max_parallel().parse().unwrap_or(100);
 
-                let port: u16 = port_str.parse().unwrap_or(19999);
+                let temp_dir = if ui.get_temp_same_as_output() {
+                    output_dir.clone()
+                } else {
+                    ui.get_temp_dir().to_string()
+                };
 
                 ui.set_server_running(true);
                 ui.set_server_status("Running".into());
@@ -61,28 +89,16 @@ async fn main() -> Result<(), slint::PlatformError> {
                         bind_host: bind_addr,
                         port,
                         output_dir,
-                        temp_dir: String::new(), // uses output_dir
+                        temp_dir,
                         certfile: cert_opt,
                         keyfile: key_opt,
-                        max_parallel,
+                        max_parallel: 100,
                     };
 
-                    {
-                        let mut s = state.lock().unwrap();
-                        s.push_log(&format!(
-                            "Server started on {}:{}",
-                            config.bind_host, config.port
-                        ));
-                    }
-
                     match run_server(config).await {
-                        Ok(_) => {
-                            let mut s = state.lock().unwrap();
-                            s.push_log("Server stopped");
-                        }
+                        Ok(_) => {}
                         Err(e) => {
-                            let mut s = state.lock().unwrap();
-                            s.push_log(&format!("Server error: {}", e));
+                            eprintln!("Server error: {}", e);
                         }
                     }
 
