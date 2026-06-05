@@ -47,15 +47,24 @@ async fn main() -> Result<(), slint::PlatformError> {
 
                     if complete {
                         let row = (0..transfers.row_count()).position(|i| {
-                            transfers.row_data(i).unwrap().client_info == client_addr.as_str()
+                            transfers
+                                .row_data(i)
+                                .unwrap()
+                                .client_info
+                                .as_str()
+                                .starts_with(client_addr.as_str())
                         });
                         if let Some(idx) = row {
                             transfers.remove(idx);
                         }
                     } else {
                         let existing = (0..transfers.row_count()).position(|i| {
-                            transfers.row_data(i).unwrap().client_info.as_str()
-                                == client_addr.as_str()
+                            transfers
+                                .row_data(i)
+                                .unwrap()
+                                .client_info
+                                .as_str()
+                                .starts_with(client_addr.as_str())
                         });
                         if existing.is_none() {
                             transfers.push(TransferData {
