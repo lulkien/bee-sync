@@ -1,0 +1,48 @@
+// Transfer list — scrollable list with per-item progress bars
+import { VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+
+export struct TransferData {
+    client-info: string,
+    filename: string,
+    progress: float,
+}
+
+export component TransferList {
+    in property<[TransferData]> transfers: [];
+
+    ScrollView {
+        for transfer in root.transfers: VerticalBox {
+            horizontal-stretch: 1;
+            padding: 4px;
+            spacing: 2px;
+
+            HorizontalBox {
+                Text {
+                    text: transfer.client-info;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+                Text {
+                    text: "  ";
+                }
+                Text {
+                    text: transfer.filename;
+                    font-size: 12px;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+            }
+            Rectangle {
+                height: 8px;
+                background: #334155;
+                horizontal-stretch: 1;
+                clip: true;
+                Rectangle {
+                    background: #22c55e;
+                    width: parent.width * max(0.01, transfer.progress);
+                    height: 100%;
+                }
+            }
+        }
+    }
+}

@@ -1,10 +1,6 @@
-import { VerticalBox, HorizontalBox, Button, LineEdit, ScrollView, CheckBox } from "std-widgets.slint";
-
-export struct TransferData {
-    client-info: string,
-    filename: string,
-    progress: float,
-}
+import { VerticalBox, CheckBox } from "std-widgets.slint";
+import { BrowseRow, AddressRow } from "config.slint";
+import { TransferData, TransferList } from "transfers.slint";
 
 export component AppWindow inherits Window {
     title: "bee-sync Server";
@@ -24,67 +20,27 @@ export component AppWindow inherits Window {
     in-out property<bool> server-running: false;
     in-out property<string> server-status: "Stopped";
 
-    // ── Transfer model (set from Rust) ──
+    // ── Transfer model ──
     in-out property<[TransferData]> transfers: [];
 
     VerticalBox {
         spacing: 4px;
         padding: 8px;
 
-        // ── Row 1: Bind address + Port + Start/Stop ──
-        HorizontalBox {
-            alignment: start;
-            spacing: 6px;
-
-            Text {
-                text: "Bind:";
-                vertical-alignment: center;
-                font-size: 13px;
-            }
-            LineEdit {
-                text <=> root.bind-address;
-                enabled: !root.server-running;
-                horizontal-stretch: 1;
-                preferred-width: 140px;
-            }
-            Text {
-                text: ":";
-                vertical-alignment: center;
-                font-size: 13px;
-            }
-            LineEdit {
-                text <=> root.port;
-                enabled: !root.server-running;
-                preferred-width: 70px;
-            }
-            Button {
-                text: root.server-running ? "Stop" : "Start";
-                preferred-width: 80px;
-                clicked => { root.start-stop-server(); }
-            }
+        // ── Row 1: Bind address + Start/Stop ──
+        AddressRow {
+            address: root.bind-address;
+            port: root.port;
+            server-running: root.server-running;
+            toggle => { root.start-stop-server(); }
         }
 
         // ── Row 2: Output dir ──
-        HorizontalBox {
-            alignment: start;
-            spacing: 6px;
-
-            Text {
-                text: "Output:";
-                vertical-alignment: center;
-                font-size: 13px;
-                preferred-width: 50px;
-            }
-            LineEdit {
-                text <=> root.output-dir;
-                enabled: !root.server-running;
-                horizontal-stretch: 1;
-            }
-            Button {
-                text: "Browse...";
-                enabled: !root.server-running;
-                clicked => { root.browse-output-dir(); }
-            }
+        BrowseRow {
+            label: "Output:";
+            value: root.output-dir;
+            enabled: !root.server-running;
+            browse => { root.browse-output-dir(); }
         }
 
         // ── Row 3: Temp dir checkbox ──
@@ -95,72 +51,27 @@ export component AppWindow inherits Window {
         }
 
         // ── Row 4: Temp dir ──
-        HorizontalBox {
-            alignment: start;
-            spacing: 6px;
-
-            Text {
-                text: "Temp:";
-                vertical-alignment: center;
-                font-size: 13px;
-                preferred-width: 50px;
-            }
-            LineEdit {
-                text <=> root.temp-dir;
-                enabled: !root.server-running && !root.temp-same-as-output;
-                horizontal-stretch: 1;
-            }
-            Button {
-                text: "Browse...";
-                enabled: !root.server-running && !root.temp-same-as-output;
-                clicked => { root.browse-temp-dir(); }
-            }
+        BrowseRow {
+            label: "Temp:";
+            value: root.temp-dir;
+            enabled: !root.server-running && !root.temp-same-as-output;
+            browse => { root.browse-temp-dir(); }
         }
 
         // ── Row 5: TLS cert ──
-        HorizontalBox {
-            alignment: start;
-            spacing: 6px;
-
-            Text {
-                text: "Cert:";
-                vertical-alignment: center;
-                font-size: 13px;
-                preferred-width: 50px;
-            }
-            LineEdit {
-                text <=> root.cert-path;
-                enabled: !root.server-running;
-                horizontal-stretch: 1;
-            }
-            Button {
-                text: "Browse...";
-                enabled: !root.server-running;
-                clicked => { root.browse-cert(); }
-            }
+        BrowseRow {
+            label: "Cert:";
+            value: root.cert-path;
+            enabled: !root.server-running;
+            browse => { root.browse-cert(); }
         }
 
         // ── Row 6: TLS key ──
-        HorizontalBox {
-            alignment: start;
-            spacing: 6px;
-
-            Text {
-                text: "Key:";
-                vertical-alignment: center;
-                font-size: 13px;
-                preferred-width: 50px;
-            }
-            LineEdit {
-                text <=> root.key-path;
-                enabled: !root.server-running;
-                horizontal-stretch: 1;
-            }
-            Button {
-                text: "Browse...";
-                enabled: !root.server-running;
-                clicked => { root.browse-key(); }
-            }
+        BrowseRow {
+            label: "Key:";
+            value: root.key-path;
+            enabled: !root.server-running;
+            browse => { root.browse-key(); }
         }
 
         // ── Separator ──
@@ -171,41 +82,9 @@ export component AppWindow inherits Window {
             vertical-alignment: center;
         }
 
-        // ── Transfer list (scrollable) ──
-        ScrollView {
-            for transfer in root.transfers: VerticalBox {
-                horizontal-stretch: 1;
-                padding: 4px;
-                spacing: 2px;
-
-                HorizontalBox {
-                    Text {
-                        text: transfer.client-info;
-                        font-size: 12px;
-                        overflow: elide;
-                    }
-                    Text {
-                        text: "  ";
-                    }
-                    Text {
-                        text: transfer.filename;
-                        font-size: 12px;
-                        font-weight: 600;
-                        overflow: elide;
-                    }
-                }
-                Rectangle {
-                    height: 8px;
-                    background: #334155;
-                    horizontal-stretch: 1;
-                    clip: true;
-                    Rectangle {
-                        background: #22c55e;
-                        width: parent.width * max(0.01, transfer.progress);
-                        height: 100%;
-                    }
-                }
-            }
+        // ── Transfer list ──
+        TransferList {
+            transfers: root.transfers;
         }
     }
 

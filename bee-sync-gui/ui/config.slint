@@ -1,0 +1,69 @@
+// Shared config components — reusable rows
+import { HorizontalBox, Button, LineEdit, CheckBox } from "std-widgets.slint";
+
+// Label + LineEdit + Browse button combo (Output, Temp, Cert, Key)
+export component BrowseRow {
+    in property<string> label: "";
+    in-out property<string> value <=> input.text;
+    in property<bool> enabled: true;
+    callback browse();
+
+    HorizontalBox {
+        alignment: start;
+        spacing: 6px;
+
+        Text {
+            text: root.label;
+            vertical-alignment: center;
+            font-size: 13px;
+            preferred-width: 50px;
+        }
+        input := LineEdit {
+            enabled: root.enabled;
+            horizontal-stretch: 1;
+        }
+        Button {
+            text: "Browse...";
+            enabled: root.enabled;
+            clicked => { root.browse(); }
+        }
+    }
+}
+
+// Bind address row: "Bind:" + host:port + Start/Stop
+export component AddressRow {
+    in-out property<string> address <=> addr.text;
+    in-out property<string> port <=> port-input.text;
+    in property<bool> server-running;
+    callback toggle();
+
+    HorizontalBox {
+        alignment: start;
+        spacing: 6px;
+
+        Text {
+            text: "Bind:";
+            vertical-alignment: center;
+            font-size: 13px;
+        }
+        addr := LineEdit {
+            enabled: !root.server-running;
+            horizontal-stretch: 1;
+            preferred-width: 140px;
+        }
+        Text {
+            text: ":";
+            vertical-alignment: center;
+            font-size: 13px;
+        }
+        port-input := LineEdit {
+            enabled: !root.server-running;
+            preferred-width: 70px;
+        }
+        Button {
+            text: root.server-running ? "Stop" : "Start";
+            preferred-width: 80px;
+            clicked => { root.toggle(); }
+        }
+    }
+}
