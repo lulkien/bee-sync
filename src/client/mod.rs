@@ -93,6 +93,24 @@ pub async fn run_client(config: ClientConfig) -> i32 {
                 info!("File already exists on server, nothing to transfer");
                 break 0;
             }
+            handshake::RESP_COMPLETE => {
+                // All chunks already on server — wait for assembly confirmation
+                info!("All chunks already on server, waiting for confirmation...");
+                break match recv_final_status(&mut control_sock, file_size).await {
+                    Ok(true) => {
+                        info!("Server confirmed transfer complete");
+                        0
+                    }
+                    Ok(false) => {
+                        error!("Server reported transfer failure");
+                        1
+                    }
+                    Err(e) => {
+                        error!("Failed to receive server confirmation: {}", e);
+                        1
+                    }
+                };
+            }
             _ => {
                 error!("Server rejected handshake (status={})", status);
                 break 1;

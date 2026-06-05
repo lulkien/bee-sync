@@ -163,6 +163,10 @@ pub mod handshake {
 
     /// Handshake response: file already exists with matching hash
     pub const RESP_EXISTS: u8 = 2;
+
+    /// Handshake response: all chunks already received and valid.
+    /// No data ports follow — server will assemble and confirm.
+    pub const RESP_COMPLETE: u8 = 3;
 }
 
 // ── Chunk transfer messages ──

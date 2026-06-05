@@ -150,8 +150,8 @@ pub async fn handle_control_connection(
 
     if all_chunks_present {
         // All chunks already valid — no data ports needed.
-        // Send empty port list, assemble immediately, send final status.
-        send_handshake_response(&mut stream, handshake::RESP_OK, &[]).await?;
+        // Send RESP_COMPLETE so the client knows to skip transfer.
+        send_handshake_response(&mut stream, handshake::RESP_COMPLETE, &[]).await?;
 
         let success = match assemble_file(&receiver) {
             Ok(true) => {
