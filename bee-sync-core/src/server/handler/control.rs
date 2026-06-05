@@ -286,6 +286,17 @@ pub async fn handle_control_connection(
         );
     }
 
+    // Notify GUI of transfer completion
+    if let Some(ref sender) = event_sender {
+        let _ = sender.send(TransferEvent {
+            client_addr: client_addr.to_string(),
+            filename: handshake.safe_name.clone(),
+            bytes_total: handshake.file_size,
+            bytes_received: if success { handshake.file_size } else { 0 },
+            complete: true,
+        });
+    }
+
     // Cleanup
     cleanup(&ports, data_tasks);
 

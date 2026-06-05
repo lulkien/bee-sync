@@ -173,30 +173,34 @@ export component AppWindow inherits Window {
 
         // ── Transfer list (scrollable) ──
         ScrollView {
-            horizontal-stretch: 1;
             for transfer in root.transfers: VerticalBox {
-                horizontal-stretch: 1;
-                spacing: 2px;
                 padding: 4px;
+                spacing: 2px;
 
                 HorizontalBox {
                     Text {
                         text: transfer.client-info;
                         font-size: 12px;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: "  ";
                     }
                     Text {
                         text: transfer.filename;
                         font-size: 12px;
                         font-weight: 600;
+                        overflow: elide;
                     }
                 }
                 Rectangle {
-                    height: 6px;
+                    height: 8px;
+                    background: #334155;
                     clip: true;
                     Rectangle {
                         background: #22c55e;
-                        width: parent.width * transfer.progress;
-                        height: 6px;
+                        width: parent.width * max(0.01, transfer.progress);
+                        height: 100%;
                     }
                 }
             }
