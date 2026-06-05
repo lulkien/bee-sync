@@ -163,8 +163,8 @@ pub async fn handle_control_connection(
             }
             Ok(false) | Err(_) => {
                 error!(
-                    "[{}] Transfer failed: {} ({} bytes, {} chunks)",
-                    client_addr, handshake.filename, handshake.file_size, handshake.num_chunks
+                    "[{}] Transfer failed: {} (corrupt chunks detected — re-run client to resend)",
+                    client_addr, handshake.filename
                 );
                 false
             }
@@ -215,7 +215,10 @@ pub async fn handle_control_connection(
         match assemble_file(&receiver) {
             Ok(s) => s,
             Err(e) => {
-                error!("Failed to assemble file: {}", e);
+                error!(
+                    "Assembly failed: {} (re-run client to resend corrupt chunks)",
+                    e
+                );
                 false
             }
         }
@@ -247,8 +250,8 @@ pub async fn handle_control_connection(
         );
     } else {
         error!(
-            "[{}] Transfer failed: {} ({} bytes, {} chunks)",
-            client_addr, handshake.filename, handshake.file_size, handshake.num_chunks
+            "[{}] Transfer failed: {} (re-run client to resume)",
+            client_addr, handshake.filename
         );
     }
 
