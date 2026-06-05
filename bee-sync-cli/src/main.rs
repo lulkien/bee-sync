@@ -159,6 +159,15 @@ async fn run_client(args: bee_sync_core::cli::ClientArgs) -> i32 {
         filepath, file_size, num_chunks, chunk_size,
     );
 
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_clone = shutdown.clone();
+    ctrlc::set_handler(move || {
+        if !shutdown_clone.swap(true, Ordering::SeqCst) {
+            info!("Interrupting transfer...");
+        }
+    })
+    .ok();
+
     let config = ClientConfig {
         host,
         port,
@@ -171,5 +180,5 @@ async fn run_client(args: bee_sync_core::cli::ClientArgs) -> i32 {
         verbose: args.verbose,
     };
 
-    client::run_client(config).await
+    client::run_client(config, shutdown).await
 }

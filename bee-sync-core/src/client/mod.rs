@@ -64,7 +64,7 @@ pub struct ClientConfig {
 }
 
 /// Main client entry point
-pub async fn run_client(config: ClientConfig) -> i32 {
+pub async fn run_client(config: ClientConfig, shutdown: Arc<AtomicBool>) -> i32 {
     let started = Instant::now();
 
     let mut interrupted = false;
@@ -118,7 +118,7 @@ pub async fn run_client(config: ClientConfig) -> i32 {
         };
 
         // Setup workers
-        let (worker_assignments, shutdown_flag, progress_bar) =
+        let (worker_assignments, progress_bar) =
             setup_workers(&config, num_chunks, &data_ports, file_size);
 
         if data_ports.is_empty() {
@@ -142,14 +142,14 @@ pub async fn run_client(config: ClientConfig) -> i32 {
         }
 
         // Run workers
-        let shutdown_check = shutdown_flag.clone();
+        let shutdown_check = shutdown.clone();
         let all_failed = run_workers(
             &config,
             worker_assignments,
             data_ports,
             file_size,
             progress_bar,
-            shutdown_flag,
+            shutdown,
         )
         .await;
 
@@ -405,8 +405,8 @@ async fn recv_final_status(
 /// * `file_size` - Total file size in bytes
 ///
 /// # Returns
-/// * `(Vec<Vec<usize>>, Arc<AtomicBool>, Arc<Mutex<ProgressBar>>)` -
-///   Worker chunk assignments, shutdown flag, and progress bar
+/// * `(Vec<Vec<usize>>, Arc<Mutex<ProgressBar>>)` -
+///   Worker chunk assignments and progress bar
 ///
 /// # Worker Assignment
 /// Chunks distributed round-robin: chunk i goes to worker (i % num_workers)
@@ -415,11 +415,7 @@ fn setup_workers(
     num_chunks: usize,
     data_ports: &[u16],
     file_size: u64,
-) -> (
-    Vec<Vec<usize>>,
-    Arc<AtomicBool>,
-    Arc<Mutex<indicatif::ProgressBar>>,
-) {
+) -> (Vec<Vec<usize>>, Arc<Mutex<indicatif::ProgressBar>>) {
     // Distribute chunks across workers (round-robin)
     let num_workers = if data_ports.is_empty() {
         0
@@ -436,8 +432,6 @@ fn setup_workers(
     }
 
     // Progress tracking
-    let shutdown_flag = Arc::new(AtomicBool::new(false));
-
     // Create progress bar (disabled in debug mode)
     let progress_bar = Arc::new(Mutex::new(indicatif::ProgressBar::new(file_size)));
     {
@@ -449,20 +443,12 @@ fn setup_workers(
         }
     }
 
-    // Signal handling
-    let shutdown_flag_clone = shutdown_flag.clone();
-
-    ctrlc::set_handler(move || {
-        shutdown_flag_clone.store(true, Ordering::SeqCst);
-    })
-    .ok();
-
     println!(
         "Sending {} chunks with {} persistent connections...",
         num_chunks, num_workers
     );
 
-    (worker_assignments, shutdown_flag, progress_bar)
+    (worker_assignments, progress_bar)
 }
 
 /// Run workers and collect results

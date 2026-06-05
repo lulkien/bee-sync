@@ -631,7 +631,6 @@ dependencies = [
  "anyhow",
  "blake3",
  "clap",
- "ctrlc",
  "fern",
  "futures-util",
  "indicatif",
